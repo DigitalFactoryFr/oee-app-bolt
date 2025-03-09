@@ -1,0 +1,119 @@
+import React from 'react';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
+
+interface ProductionData {
+  date: string;
+  actual: number;
+  target: number;
+  scrap: number;
+}
+
+interface ComparisonData {
+  date: string;
+  actual: number;
+  target: number;
+  scrap: number;
+}
+
+interface ProductionChartProps {
+  data: ProductionData[];
+  comparisonData?: ComparisonData[];
+  showComparison?: boolean;
+  comparisonLabel?: string;
+}
+
+const ProductionChart: React.FC<ProductionChartProps> = ({ 
+  data, 
+  comparisonData,
+  showComparison = false,
+  comparisonLabel = 'Previous Period'
+}) => {
+  const combinedData = data.map((item, index) => ({
+    ...item,
+    ...(showComparison && comparisonData && comparisonData[index] ? {
+      actual_prev: comparisonData[index].actual,
+      target_prev: comparisonData[index].target,
+      scrap_prev: comparisonData[index].scrap
+    } : {})
+  }));
+
+  const CustomTooltip = ({ active, payload, label }: any) => {
+    if (active && payload && payload.length > 0) {
+      return (
+        <div className="bg-white p-3 border border-gray-200 shadow-lg rounded-lg">
+          <p className="text-sm font-medium text-gray-900 mb-2">Date: {label}</p>
+          <div className="space-y-1">
+            <p className="text-sm text-blue-600">
+              Actual: {payload[0].value}
+              {showComparison && payload[3] && (
+                <span className="text-gray-500 ml-2">
+                  (prev: {payload[3].value})
+                </span>
+              )}
+            </p>
+            <p className="text-sm text-green-600">
+              Target: {payload[1].value}
+              {showComparison && payload[4] && (
+                <span className="text-gray-500 ml-2">
+                  (prev: {payload[4].value})
+                </span>
+              )}
+            </p>
+            <p className="text-sm text-red-600">
+              Scrap: {payload[2].value}
+              {showComparison && payload[5] && (
+                <span className="text-gray-500 ml-2">
+                  (prev: {payload[5].value})
+                </span>
+              )}
+            </p>
+          </div>
+        </div>
+      );
+    }
+    return null;
+  };
+
+  return (
+    <ResponsiveContainer width="100%" height={300}>
+      <BarChart data={combinedData}>
+        <CartesianGrid strokeDasharray="3 3" />
+        <XAxis dataKey="date" />
+        <YAxis />
+        <Tooltip content={<CustomTooltip />} />
+        <Legend />
+        
+        {/* Current period */}
+        <Bar dataKey="actual" name="Actual Production" fill="#2563eb" />
+        <Bar dataKey="target" name="Target" fill="#16a34a" />
+        <Bar dataKey="scrap" name="Scrap" fill="#dc2626" />
+
+        {/* Previous period */}
+        {showComparison && (
+          <>
+            <Bar 
+              dataKey="actual_prev" 
+              name={`Actual (${comparisonLabel})`} 
+              fill="#2563eb" 
+              fillOpacity={0.3} 
+            />
+            <Bar 
+              dataKey="target_prev" 
+              name={`Target (${comparisonLabel})`} 
+              fill="#16a34a" 
+              fillOpacity={0.3} 
+            />
+            <Bar 
+              dataKey="scrap_prev" 
+              name={`Scrap (${comparisonLabel})`} 
+              fill="#dc2626" 
+              fillOpacity={0.3} 
+            />
+          </>
+        )}
+      </BarChart>
+    </ResponsiveContainer>
+  );
+};
+
+export default ProductionChart;
