@@ -1,40 +1,62 @@
 import React, { useState, useEffect } from 'react';
 import { useParams } from 'react-router-dom';
 import { format, parseISO, differenceInMinutes } from 'date-fns';
-import { Calculator, Download } from 'lucide-react';
+import { Download, Calculator } from 'lucide-react';
 import ProjectLayout from '../../../components/layout/ProjectLayout';
 import { supabase } from '../../../lib/supabase';
 
-interface OEECalculation {
+interface OEEData {
   date: string;
   line: string;
   machine: string;
   product: string;
   team: string;
-  openingTime: number;
-  lotDuration: number;
-  totalLotDuration: number;
-  adjustedLotDuration: number;
-  plannedDowntime: number;
-  otherDowntime: number;
-  scrapCount: number;
-  totalParts: number;
-  goodParts: number;
-  availability: number;
-  performance: number;
-  quality: number;
-  oee: number;
+  operator: string;
+  start_time: string;
+  end_time: string;
+  opening_time: number;
+  lot_duration: number;
+  planned_dt: number;
+  other_dt: number;
+  good_parts: number;
+  scrap: number;
+  theoretical_parts: number;
+  products: {
+    cycle_time: number;
+  };
 }
 
-const OEEDraftPage: React.FC = () => {
+const OEEDraft: React.FC = () => {
   const { projectId } = useParams<{ projectId: string }>();
-  const [calculations, setCalculations] = useState<OEECalculation[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [data, setData] = useState<OEEData[]>([]);
 
   useEffect(() => {
     loadData();
   }, [projectId]);
+
+  const calculateMetrics = (row: OEEData) => {
+    const totalParts = row.good_parts + row.scrap;
+    const availableTime = row.opening_time - row.planned_dt;
+    const actualProductionTime = row.lot_duration - row.planned_dt - row.other_dt;
+    const cycleTimeMinutes = row.products.cycle_time / 60;
+    const theoreticalProductionTime = totalParts * cycleTimeMinutes;
+
+    const availability = (actualProductionTime / availableTime) * 100;
+    const performance = (totalParts / row.theoretical_parts) * 100;
+    const quality = (row.good_parts / totalParts) * 100;
+    const oee = (availability * performance * quality) / 10000;
+
+    return {
+      availability: Math.min(100, Math.max(0, availability)),
+      performance: Math.min(100, Math.max(0, performance)),
+      quality: Math.min(100, Math.max(0, quality)),
+      oee: Math.min(100, Math.max(0, oee)),
+      actualProductionTime,
+      theoreticalProductionTime
+    };
+  };
 
   const loadData = async () => {
     if (!projectId) return;
@@ -43,8 +65,9 @@ const OEEDraftPage: React.FC = () => {
       setLoading(true);
       setError(null);
 
-      // Fetch all required data
-      const [lotsResult, stopsResult, qualityResult, linesResult, machinesResult] = await Promise.all([
+      console.log("🔍 Fetching data for project:", projectId);
+
+      const [lotsResult, stopsResult, qualityResult] = await Promise.all([
         supabase
           .from('lots')
           .select(`
@@ -54,186 +77,242 @@ const OEEDraftPage: React.FC = () => {
             end_time,
             lot_size,
             ok_parts_produced,
-            products (name, cycle_time),
-            machines (name, line_id),
-            team_members (email, working_time_minutes)
+            products (
+              id,
+              name,
+              cycle_time,
+              machine_id,
+              machines (
+                id,
+                name,
+                production_lines (
+                  id,
+                  name,
+                  opening_time_minutes
+                )
+              )
+            ),
+            team_members (
+              id,
+              email,
+              team_name
+            ),
+            status
           `)
           .eq('project_id', projectId)
-          .order('date', { ascending: false })
-          .limit(30),
+          .order('date', { ascending: true }),
+
         supabase
           .from('stop_events')
-          .select('*')
+          .select(`
+            id,
+            date,
+            start_time,
+            end_time,
+            failure_type,
+            machine,
+            cause,
+            status,
+            lot_id
+          `)
           .eq('project_id', projectId),
+
         supabase
           .from('quality_issues')
-          .select('*')
-          .eq('project_id', projectId)
-          .eq('category', 'scrap'),
-        supabase
-          .from('production_lines')
-          .select('id, name')
-          .eq('project_id', projectId),
-        supabase
-          .from('machines')
-          .select('id, name, line_id')
+          .select(`
+            id,
+            date,
+            start_time,
+            end_time,
+            category,
+            quantity,
+            machine,
+            cause,
+            status,
+            lot_id
+          `)
           .eq('project_id', projectId)
       ]);
 
       if (lotsResult.error) throw lotsResult.error;
       if (stopsResult.error) throw stopsResult.error;
       if (qualityResult.error) throw qualityResult.error;
-      if (linesResult.error) throw linesResult.error;
-      if (machinesResult.error) throw machinesResult.error;
 
-      // Group data by date and machine
-      const calculationMap = new Map<string, OEECalculation>();
+      console.log("📊 Raw data fetched:", {
+        lots: lotsResult.data?.length || 0,
+        stops: stopsResult.data?.length || 0,
+        quality: qualityResult.data?.length || 0
+      });
 
-      // Process lots
+      const lotsByDateAndMachine = new Map<string, any[]>();
+      
       lotsResult.data?.forEach(lot => {
-        const machineId = lot.machines?.id;
-        const machine = machinesResult.data?.find(m => m.id === machineId);
-        const line = linesResult.data?.find(l => l.id === machine?.line_id);
-        
-        if (!machine || !line) return;
-
-        const key = `${lot.date}-${machine.id}`;
-        const existing = calculationMap.get(key) || {
-          date: lot.date,
-          line: line.name,
-          machine: machine.name,
-          product: lot.products?.name || '',
-          team: lot.team_members?.email || '',
-          openingTime: lot.team_members?.working_time_minutes || 480,
-          lotDuration: 0,
-          totalLotDuration: 0,
-          adjustedLotDuration: 0,
-          plannedDowntime: 0,
-          otherDowntime: 0,
-          scrapCount: 0,
-          totalParts: 0,
-          goodParts: 0,
-          availability: 0,
-          performance: 0,
-          quality: 0,
-          oee: 0
-        };
-
-        // Calculate lot duration
-        const startTime = new Date(lot.start_time);
-        const endTime = lot.end_time ? new Date(lot.end_time) : new Date();
-        const duration = differenceInMinutes(endTime, startTime);
-
-        existing.lotDuration = duration;
-        existing.totalLotDuration += duration;
-        existing.totalParts += lot.lot_size;
-        existing.goodParts += lot.ok_parts_produced;
-
-        calculationMap.set(key, existing);
-      });
-
-      // Process stops
-      stopsResult.data?.forEach(stop => {
-        const key = `${stop.date}-${stop.machine}`;
-        const calculation = calculationMap.get(key);
-        if (!calculation) return;
-
-        const startTime = new Date(stop.start_time);
-        const endTime = stop.end_time ? new Date(stop.end_time) : new Date();
-        const duration = differenceInMinutes(endTime, startTime);
-
-        if (stop.failure_type === 'AP') {
-          calculation.plannedDowntime += duration;
-        } else {
-          calculation.otherDowntime += duration;
+        const key = `${lot.date}-${lot.products.machine_id}`;
+        if (!lotsByDateAndMachine.has(key)) {
+          lotsByDateAndMachine.set(key, []);
         }
+        lotsByDateAndMachine.get(key)?.push(lot);
       });
 
-      // Process quality issues
-      qualityResult.data?.forEach(issue => {
-        const key = `${issue.date}-${issue.machine}`;
-        const calculation = calculationMap.get(key);
-        if (!calculation) return;
+      const processedData: OEEData[] = [];
 
-        calculation.scrapCount += issue.quantity;
-      });
-
-      // Calculate final metrics
-      calculationMap.forEach(calc => {
-        // Adjust lot duration based on number of lots
-        const lotsForMachine = lotsResult.data?.filter(
-          lot => lot.date === calc.date && lot.machines?.name === calc.machine
+      lotsByDateAndMachine.forEach((machineLots, key) => {
+        const [date, machineId] = key.split('-');
+        
+        machineLots.sort((a, b) => 
+          new Date(a.start_time).getTime() - new Date(b.start_time).getTime()
         );
-        const numberOfLots = lotsForMachine?.length || 1;
-        const remainingTime = calc.openingTime - calc.totalLotDuration;
-        calc.adjustedLotDuration = calc.totalLotDuration + (remainingTime / numberOfLots);
 
-        // Calculate availability
-        const availableTime = calc.openingTime - calc.plannedDowntime;
-        const runningTime = availableTime - calc.otherDowntime;
-        calc.availability = (runningTime / availableTime) * 100;
+        machineLots.forEach(lot => {
+          if (!lot.products?.machines?.production_lines) {
+            console.warn("⚠️ Skipping lot due to missing machine/line info:", lot.id);
+            return;
+          }
 
-        // Calculate performance
-        calc.performance = (calc.totalLotDuration / calc.adjustedLotDuration) * 100;
+          const openingTime = lot.products.machines.production_lines.opening_time_minutes;
+          const startTime = new Date(lot.start_time);
+          const endTime = lot.status === 'completed' ? new Date(lot.end_time) : new Date();
+          
+          const lotDuration = differenceInMinutes(endTime, startTime);
 
-        // Calculate quality
-        calc.quality = calc.totalParts > 0 ? ((calc.goodParts) / calc.totalParts) * 100 : 0;
+          const lotStops = stopsResult.data?.filter(stop => 
+            stop.lot_id === lot.id || (
+              stop.date === date &&
+              stop.machine === machineId &&
+              new Date(stop.start_time) >= startTime &&
+              new Date(stop.end_time || new Date()) <= endTime
+            )
+          ) || [];
 
-        // Calculate OEE
-        calc.oee = (calc.availability * calc.performance * calc.quality) / 10000;
+          console.log(`📊 Found ${lotStops.length} stops for lot ${lot.id}`);
 
-        // Ensure all metrics are between 0 and 100
-        calc.availability = Math.min(100, Math.max(0, calc.availability));
-        calc.performance = Math.min(100, Math.max(0, calc.performance));
-        calc.quality = Math.min(100, Math.max(0, calc.quality));
-        calc.oee = Math.min(100, Math.max(0, calc.oee));
+          const plannedDT = lotStops
+            .filter(stop => stop.failure_type === 'AP')
+            .reduce((total, stop) => {
+              const stopStart = new Date(stop.start_time);
+              const stopEnd = stop.end_time ? new Date(stop.end_time) : new Date();
+              return total + differenceInMinutes(stopEnd, stopStart);
+            }, 0);
+
+          const otherDT = lotStops
+            .filter(stop => stop.failure_type !== 'AP')
+            .reduce((total, stop) => {
+              const stopStart = new Date(stop.start_time);
+              const stopEnd = stop.end_time ? new Date(stop.end_time) : new Date();
+              return total + differenceInMinutes(stopEnd, stopStart);
+            }, 0);
+
+          const lotQuality = qualityResult.data?.filter(issue => 
+            issue.lot_id === lot.id || (
+              issue.date === date &&
+              issue.machine === machineId &&
+              new Date(issue.start_time) >= startTime &&
+              new Date(issue.end_time || new Date()) <= endTime
+            )
+          ) || [];
+
+          console.log(`📊 Found ${lotQuality.length} quality issues for lot ${lot.id}`);
+
+          const scrap = lotQuality
+            .filter(issue => issue.category === 'scrap')
+            .reduce((total, issue) => total + issue.quantity, 0);
+
+          const cycleTime = lot.products.cycle_time;
+          const availableTime = openingTime - plannedDT;
+          const theoreticalParts = Math.floor((availableTime * 60) / cycleTime);
+
+          processedData.push({
+            date: lot.date,
+            line: lot.products.machines.production_lines.name,
+            machine: lot.products.machines.name,
+            product: lot.products.name,
+            team: lot.team_members.team_name,
+            operator: lot.team_members.email,
+            start_time: format(startTime, 'HH:mm'),
+            end_time: format(endTime, 'HH:mm'),
+            opening_time: openingTime,
+            lot_duration: lotDuration,
+            planned_dt: plannedDT,
+            other_dt: otherDT,
+            scrap,
+            good_parts: lot.ok_parts_produced,
+            theoretical_parts: theoreticalParts,
+            products: {
+              cycle_time: lot.products.cycle_time
+            }
+          });
+        });
       });
 
-      setCalculations(Array.from(calculationMap.values()));
+      console.log("✅ Processed data:", processedData.length, "records");
+      setData(processedData);
       setLoading(false);
     } catch (err) {
-      console.error('Error loading OEE data:', err);
+      console.error('❌ Error loading OEE data:', err);
       setError(err instanceof Error ? err.message : 'Failed to load OEE data');
       setLoading(false);
     }
   };
 
   const handleExport = () => {
-    const csv = [
-      ['Date', 'Line', 'Machine', 'Product', 'Team', 'Opening Time', 'Lot Duration', 
-       'Total Lot Duration', 'Adjusted Lot Duration', 'Planned Downtime', 'Other Downtime',
-       'Scrap Count', 'Total Parts', 'Good Parts', 'Availability', 'Performance', 'Quality', 'OEE'].join(','),
-      ...calculations.map(calc => [
-        calc.date,
-        calc.line,
-        calc.machine,
-        calc.product,
-        calc.team,
-        calc.openingTime,
-        calc.lotDuration,
-        calc.totalLotDuration,
-        calc.adjustedLotDuration,
-        calc.plannedDowntime,
-        calc.otherDowntime,
-        calc.scrapCount,
-        calc.totalParts,
-        calc.goodParts,
-        calc.availability.toFixed(2),
-        calc.performance.toFixed(2),
-        calc.quality.toFixed(2),
-        calc.oee.toFixed(2)
-      ].join(','))
-    ].join('\n');
+    const headers = [
+      'Date',
+      'Line',
+      'Machine',
+      'Product',
+      'Team',
+      'Operator',
+      'Start Time',
+      'End Time',
+      'Opening Time',
+      'Lot Duration',
+      'Planned DT',
+      'Other DT',
+      'Good Parts',
+      'Scrap',
+      'Theoretical Parts',
+      'Availability %',
+      'Performance %',
+      'Quality %',
+      'OEE %'
+    ];
 
-    const blob = new Blob([csv], { type: 'text/csv' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `oee_calculations_${format(new Date(), 'yyyy-MM-dd')}.csv`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+    const rows = data.map(row => {
+      const metrics = calculateMetrics(row);
+      return [
+        row.date,
+        row.line,
+        row.machine,
+        row.product,
+        row.team,
+        row.operator,
+        row.start_time,
+        row.end_time,
+        row.opening_time,
+        row.lot_duration,
+        row.planned_dt,
+        row.other_dt,
+        row.good_parts,
+        row.scrap,
+        row.theoretical_parts,
+        metrics.availability.toFixed(1),
+        metrics.performance.toFixed(1),
+        metrics.quality.toFixed(1),
+        metrics.oee.toFixed(1)
+      ];
+    });
+
+    const csv = [headers, ...rows]
+      .map(row => row.map(cell => `"${cell}"`).join(','))
+      .join('\n');
+
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = `oee_calculations_${format(new Date(), 'yyyy-MM-dd')}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
   };
 
   return (
@@ -243,7 +322,7 @@ const OEEDraftPage: React.FC = () => {
           <div>
             <h2 className="text-2xl font-bold text-gray-900">OEE Draft Calculations</h2>
             <p className="mt-1 text-sm text-gray-500">
-              Detailed OEE calculations with adjusted lot durations
+              Detailed OEE calculations with example-based metrics
             </p>
           </div>
           <button
@@ -269,52 +348,143 @@ const OEEDraftPage: React.FC = () => {
             </div>
           </div>
         ) : (
-          <div className="bg-white shadow-sm rounded-lg overflow-hidden">
+          <div className="bg-white shadow rounded-lg overflow-hidden">
             <div className="overflow-x-auto">
               <table className="min-w-full divide-y divide-gray-200">
                 <thead className="bg-gray-50">
                   <tr>
-                    <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
-                    <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Line</th>
-                    <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Machine</th>
-                    <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Product</th>
-                    <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Team</th>
-                    <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Opening Time</th>
-                    <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Lot Duration</th>
-                    <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Adjusted Duration</th>
-                    <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Planned DT</th>
-                    <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Other DT</th>
-                    <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Scrap</th>
-                    <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Parts</th>
-                    <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Good Parts</th>
-                    <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">A (%)</th>
-                    <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">P (%)</th>
-                    <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Q (%)</th>
-                    <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">OEE (%)</th>
+                    <th scope="col" className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Date
+                    </th>
+                    <th scope="col" className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Line
+                    </th>
+                    <th scope="col" className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Machine
+                    </th>
+                    <th scope="col" className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Product
+                    </th>
+                    <th scope="col" className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Team/Operator
+                    </th>
+                    <th scope="col" className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Start Time
+                    </th>
+                    <th scope="col" className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      End Time
+                    </th>
+                    <th scope="col" className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Opening Time
+                    </th>
+                    <th scope="col" className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Lot Duration
+                    </th>
+                    <th scope="col" className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Planned DT
+                    </th>
+                    <th scope="col" className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Other DT
+                    </th>
+                    <th scope="col" className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Good Parts
+                    </th>
+                    <th scope="col" className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Scrap
+                    </th>
+                    <th scope="col" className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Theoretical
+                    </th>
+                    <th scope="col" className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Availability
+                    </th>
+                    <th scope="col" className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Performance
+                    </th>
+                    <th scope="col" className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Quality
+                    </th>
+                    <th scope="col" className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      OEE
+                    </th>
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200">
-                  {calculations.map((calc, index) => (
-                    <tr key={`${calc.date}-${calc.machine}-${index}`}>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{calc.date}</td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{calc.line}</td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{calc.machine}</td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{calc.product}</td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{calc.team}</td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{calc.openingTime}</td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{calc.lotDuration}</td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{calc.adjustedLotDuration.toFixed(1)}</td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{calc.plannedDowntime}</td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{calc.otherDowntime}</td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{calc.scrapCount}</td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{calc.totalParts}</td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{calc.goodParts}</td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-blue-600">{calc.availability.toFixed(1)}</td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-green-600">{calc.performance.toFixed(1)}</td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-purple-600">{calc.quality.toFixed(1)}</td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{calc.oee.toFixed(1)}</td>
-                    </tr>
-                  ))}
+                  {data.map((row, index) => {
+                    const metrics = calculateMetrics(row);
+
+                    return (
+                      <tr key={index} className="hover:bg-gray-50">
+                        <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-900">
+                          {row.date}
+                        </td>
+                        <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-900">
+                          {row.line}
+                        </td>
+                        <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-900">
+                          {row.machine}
+                        </td>
+                        <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-900">
+                          {row.product}
+                        </td>
+                        <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-500">
+                          <div>{row.team}</div>
+                          <div className="text-xs text-gray-400">{row.operator}</div>
+                        </td>
+                        <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-500">
+                          {row.start_time}
+                        </td>
+                        <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-500">
+                          {row.end_time}
+                        </td>
+                        <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-500">
+                          {row.opening_time}
+                        </td>
+                        <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-500">
+                          {row.lot_duration}
+                        </td>
+                        <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-500">
+                          {row.planned_dt}
+                        </td>
+                        <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-500">
+                          {row.other_dt}
+                        </td>
+                        <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-500">
+                          {row.good_parts}
+                        </td>
+                        <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-500">
+                          {row.scrap}
+                        </td>
+                        <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-500">
+                          {row.theoretical_parts}
+                        </td>
+                        <td className="px-3 py-4 whitespace-nowrap text-sm">
+                          <span className="text-green-600 font-medium">{metrics.availability.toFixed(1)}%</span>
+                          <div className="text-xs text-gray-400">
+                            {row.lot_duration - row.planned_dt - row.other_dt}/{row.opening_time - row.planned_dt}
+                          </div>
+                        </td>
+                        <td className="px-3 py-4 whitespace-nowrap text-sm">
+                          <span className="text-orange-600 font-medium">{metrics.performance.toFixed(1)}%</span>
+                          <div className="text-xs text-gray-400">
+                            {row.good_parts + row.scrap}/{row.theoretical_parts}
+                          </div>
+                        </td>
+                        <td className="px-3 py-4 whitespace-nowrap text-sm">
+                          <span className="text-purple-600 font-medium">{metrics.quality.toFixed(1)}%</span>
+                          <div className="text-xs text-gray-400">
+                            {row.good_parts}/{row.good_parts + row.scrap}
+                          </div>
+                        </td>
+                        <td className="px-3 py-4 whitespace-nowrap text-sm">
+                          <span className="text-blue-600 font-medium">{metrics.oee.toFixed(1)}%</span>
+                          <div className="text-xs text-gray-400">
+                            A × P × Q
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -325,4 +495,4 @@ const OEEDraftPage: React.FC = () => {
   );
 };
 
-export default OEEDraftPage;
+export default OEEDraft;
