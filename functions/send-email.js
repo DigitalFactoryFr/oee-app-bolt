@@ -3,14 +3,17 @@ import { Resend } from 'resend';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import serverless from 'serverless-http';
+import path from "path";
 
-dotenv.config();  // ✅ Charge les variables d’environnement
+dotenv.config({ path: path.resolve(process.cwd(), ".env") });
+
+console.log("✅ RESEND_API_KEY chargé :", process.env.RESEND_API_KEY);
 
 const app = express();
 app.use(express.json());
 app.use(cors());
 
-// ✅ Initialise Resend avec l'API Key stockée sur Netlify
+// ✅ Initialise Resend avec la clé API stockée sur Netlify
 const resend = new Resend(process.env.RESEND_API_KEY);
 
 app.post('/send-email', async (req, res) => {
@@ -19,6 +22,7 @@ app.post('/send-email', async (req, res) => {
   const { to, subject, html } = req.body;
 
   if (!to || !subject || !html) {
+    console.error("❌ Erreur : Paramètres manquants !");
     return res.status(400).json({ message: 'Tous les champs sont obligatoires' });
   }
 
@@ -39,5 +43,5 @@ app.post('/send-email', async (req, res) => {
   }
 });
 
-// ✅ Exporte la fonction serverless
+// ✅ Exporte la fonction serverless pour Netlify
 export const handler = serverless(app);
