@@ -5,7 +5,7 @@ import dotenv from 'dotenv';
 import serverless from 'serverless-http';
 import path from "path";
 
-dotenv.config({ path: path.resolve(process.cwd(), ".env") });
+dotenv.config({ path: '../.env' });
 
 console.log("✅ RESEND_API_KEY chargé :", process.env.RESEND_API_KEY);
 
