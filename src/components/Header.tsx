@@ -12,8 +12,8 @@ const Header = () => {
 
   const sendEmail = async () => {
     const API_URL = process.env.NODE_ENV === 'production'
-      ? 'https://i40pilot.app/.netlify/functions/send-email' // Endpoint Netlify
-      : 'http://localhost:9999/send-email';
+      ? 'https://oee-app-bolt.onrender.com/send-email' // Endpoint Netlify
+      : 'http://localhost:3000/send-email';
 
     try {
       const response = await fetch(API_URL, {
