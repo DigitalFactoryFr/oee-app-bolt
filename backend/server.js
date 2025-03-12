@@ -3,18 +3,16 @@ import cors from "cors";
 import dotenv from "dotenv";
 import { Resend } from "resend";
 
+dotenv.config({ path: '../.env' }); // Charge le fichier .env depuis la racine
+
 const app = express();
-const PORT = process.env.PORT || 5000;
-
-dotenv.config({ path: '../.env' }); 
-
-
 app.use(express.json());
 app.use(cors());
 
+// Initialise Resend avec la clé API
 const resend = new Resend(process.env.RESEND_API_KEY);
 
-// 3. Route POST /send-email
+// Route POST /send-email
 app.post("/send-email", async (req, res) => {
   console.log("📩 Requête reçue :", req.body);
 
@@ -39,9 +37,9 @@ app.post("/send-email", async (req, res) => {
   }
 });
 
-// 4. Lance le serveur sur process.env.PORT (assigné par Render ou Heroku)
-//    ou 5000 en fallback local.
-
-app.listen(PORT, () => {
+// Pour Render, le serveur doit écouter sur le port donné par Render (process.env.PORT)
+// Si la variable PORT n'est pas définie (en local), on utilise 5000 par défaut
+const PORT = process.env.PORT || 5000;
+app.listen(PORT, "0.0.0.0", () => {
   console.log(`🚀 Serveur lancé sur le port ${PORT}`);
 });
