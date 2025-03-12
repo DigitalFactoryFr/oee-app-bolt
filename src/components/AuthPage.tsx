@@ -106,8 +106,8 @@ const AuthPage: React.FC = () => {
   };
 
 const API_URL = process.env.NODE_ENV === 'production'
-  ? 'https://i40pilot.app/.netlify/functions/send-email'
-  : 'http://localhost:9999/send-email';
+  ? 'https://oee-app-bolt.onrender.com/send-email'
+  : 'http://localhost:5000/send-email';
 
 const sendEmail = async (email: string) => {
   try {
