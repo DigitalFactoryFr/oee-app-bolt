@@ -3,10 +3,12 @@ import cors from "cors";
 import dotenv from "dotenv";
 import { Resend } from "resend";
 
+const app = express();
+const PORT = process.env.PORT || 5000;
 
 dotenv.config({ path: '../.env' }); 
 
-const app = express();
+
 app.use(express.json());
 app.use(cors());
 
@@ -39,7 +41,7 @@ app.post("/send-email", async (req, res) => {
 
 // 4. Lance le serveur sur process.env.PORT (assigné par Render ou Heroku)
 //    ou 5000 en fallback local.
-const PORT = process.env.PORT || 5000;
+
 app.listen(PORT, () => {
   console.log(`🚀 Serveur lancé sur le port ${PORT}`);
 });
