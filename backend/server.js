@@ -3,24 +3,25 @@ import cors from "cors";
 import dotenv from "dotenv";
 import { Resend } from "resend";
 
-dotenv.config({ path: '../.env' }); // Charge le fichier .env depuis la racine
+// Charge les variables d'environnement dès le début.
+dotenv.config({ path: '../.env' });
 
 const app = express();
 app.use(express.json());
 app.use(cors());
 
-// Initialise Resend avec la clé API
+// Forcer le port 5000 (pour le test local)
+const PORT = 5000;
+
 const resend = new Resend(process.env.RESEND_API_KEY);
 
 // Route POST /send-email
 app.post("/send-email", async (req, res) => {
   console.log("📩 Requête reçue :", req.body);
-
   const { to, subject, html } = req.body;
   if (!to || !subject || !html) {
     return res.status(400).json({ message: "Paramètres manquants" });
   }
-
   try {
     console.log("📨 Envoi de l'email via Resend...");
     const response = await resend.emails.send({
@@ -37,9 +38,7 @@ app.post("/send-email", async (req, res) => {
   }
 });
 
-// Pour Render, le serveur doit écouter sur le port donné par Render (process.env.PORT)
-// Si la variable PORT n'est pas définie (en local), on utilise 5000 par défaut
-const PORT = process.env.PORT || 5000;
+// Démarre le serveur sur l'adresse 0.0.0.0 pour être accessible de l'extérieur
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`🚀 Serveur lancé sur le port ${PORT}`);
 });
