@@ -144,7 +144,7 @@ const sendEmail = async (email: string) => {
         </button>
         <div className="flex items-center justify-center">
           <Activity className="h-8 w-8 text-blue-600" />
-          <span className="ml-2 text-xl font-bold text-gray-900">linQ</span>
+          <span className="ml-2 text-xl font-bold text-gray-900">Pilot</span>
         </div>
         <h2 className="mt-6 text-center text-3xl font-extrabold text-gray-900">
           {mode === 'login' ? 'Sign in to your account' : 'Create a new account'}
