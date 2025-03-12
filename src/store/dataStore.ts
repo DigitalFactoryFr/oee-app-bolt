@@ -107,22 +107,8 @@ export const useDataStore = create<DataState>((set, get) => ({
       if (trackingError) throw trackingError;
 
       const tracking = trackingResult as LotTracking;
-
-      const allTrackings = await get().getLotTrackings(lotId);
-      const totalPartsProduced = allTrackings.reduce((sum, t) => sum + t.parts_produced, 0) + (trackingData.parts_produced || 0);
-
-      const { error: lotError } = await supabase
-        .from('lots')
-        .update({ ok_parts_produced: totalPartsProduced })
-        .eq('id', lotId);
-
-      if (lotError) throw lotError;
-
       set((state) => ({
         lotTrackings: [...state.lotTrackings, tracking],
-        lots: state.lots.map(l => 
-          l.id === lotId ? { ...l, ok_parts_produced: totalPartsProduced } : l
-        ),
         loading: false
       }));
 
@@ -308,7 +294,7 @@ export const useDataStore = create<DataState>((set, get) => ({
           team_member: teamMember.id,
           product: product.id,
           machine: machine.id,
-          lot_id: lot.lot_id,
+          lot_id: lot.lot_id || `LOT-${lot.date}-${String(index + 1).padStart(3, '0')}`,
           lot_size: lot.lot_size,
           ok_parts_produced: lot.ok_parts_produced,
           status: isCompleted ? 'completed' : 'in_progress'
@@ -373,6 +359,14 @@ export const useDataStore = create<DataState>((set, get) => ({
         machines.map(m => [m.name.toLowerCase(), m])
       );
 
+      // First get all lots to match with stops
+      const { data: lots, error: lotsError } = await supabase
+        .from('lots')
+        .select('id, date, start_time, end_time, product, machine, team_member')
+        .eq('project_id', projectId);
+
+      if (lotsError) throw lotsError;
+
       const stopsToInsert = stops.map((stop, index) => {
         const teamMember = teamMemberMap.get(stop.team_member.toLowerCase());
         const product = productMap.get(stop.product.toLowerCase());
@@ -391,6 +385,22 @@ export const useDataStore = create<DataState>((set, get) => ({
         const startTime = formatDateTime(stop.date, stop.start_time);
         const endTime = formatDateTime(stop.date, stop.end_time);
 
+        // Find matching lot
+        const matchingLot = lots?.find(lot => {
+          const lotStart = new Date(lot.start_time);
+          const lotEnd = lot.end_time ? new Date(lot.end_time) : new Date();
+          const stopStart = new Date(startTime);
+          const stopEnd = new Date(endTime);
+
+          return (
+            lot.machine === machine.id &&
+            lot.product === product.id &&
+            lot.team_member === teamMember.id &&
+            ((stopStart >= lotStart && stopStart <= lotEnd) ||
+             (stopEnd >= lotStart && stopEnd <= lotEnd))
+          );
+        });
+
         const now = new Date();
         const stopEndTime = new Date(endTime);
         const isCompleted = stopEndTime <= now;
@@ -406,6 +416,7 @@ export const useDataStore = create<DataState>((set, get) => ({
           failure_type: stop.failure_type,
           cause: stop.cause,
           comment: stop.comment,
+          lot_id: matchingLot?.id,
           status: isCompleted ? 'completed' : 'ongoing'
         };
       });
@@ -462,6 +473,14 @@ export const useDataStore = create<DataState>((set, get) => ({
         machines.map(m => [m.name.toLowerCase(), m])
       );
 
+      // First get all lots to match with quality issues
+      const { data: lots, error: lotsError } = await supabase
+        .from('lots')
+        .select('id, date, start_time, end_time, product, machine, team_member')
+        .eq('project_id', projectId);
+
+      if (lotsError) throw lotsError;
+
       const qualityToInsert = quality.map((issue, index) => {
         const teamMember = teamMemberMap.get(issue.team_member.toLowerCase());
         const product = productMap.get(issue.product.toLowerCase());
@@ -476,6 +495,17 @@ export const useDataStore = create<DataState>((set, get) => ({
         if (!machine) {
           throw new Error(`Row ${index + 1}: Machine not found: ${issue.machine}`);
         }
+
+        // Find matching lot
+        const matchingLot = lots?.find(lot => {
+          const lotDate = lot.date;
+          return (
+            lot.machine === machine.id &&
+            lot.product === product.id &&
+            lot.team_member === teamMember.id &&
+            lotDate === issue.date
+          );
+        });
 
         const issueDate = new Date(issue.date);
         const now = new Date();
@@ -503,7 +533,8 @@ export const useDataStore = create<DataState>((set, get) => ({
           category: issue.category,
           quantity: issue.quantity,
           cause: issue.cause,
-          comment: issue.comment
+          comment: issue.comment,
+          lot_id: matchingLot?.id
         };
       });
 

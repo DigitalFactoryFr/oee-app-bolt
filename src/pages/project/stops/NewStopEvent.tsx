@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useForm } from 'react-hook-form';
-import { Check, Search, Clock, Package, User, Activity } from 'lucide-react';
+import { AlertTriangle, Check, Search, Clock, Package, User, Activity } from 'lucide-react';
 import ProjectLayout from '../../../components/layout/ProjectLayout';
 import { useTeamStore } from '../../../store/teamStore';
 import { useProductStore } from '../../../store/productStore';

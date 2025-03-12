@@ -1,12 +1,11 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useForm } from 'react-hook-form';
-import { Upload, Check, AlertCircle, Download, Trash2 } from 'lucide-react';
+import { Check, Trash2 } from 'lucide-react';
 import ProjectLayout from '../../components/layout/ProjectLayout';
 import { usePlantConfigStore } from '../../store/plantConfigStore';
 import { useProjectStore } from '../../store/projectStore';
 import { useOnboardingStore } from '../../store/onboardingStore';
-import { parseExcelFile, generateExcelTemplate } from '../../utils/excelParser';
 
 interface PlantConfigFormData {
   name: string;
@@ -19,11 +18,10 @@ const PlantConfigPage: React.FC = () => {
   const { projectId } = useParams<{ projectId: string }>();
   const navigate = useNavigate();
   const { plantConfig, loading, error, fetchPlantConfig, createPlantConfig, updatePlantConfig } = usePlantConfigStore();
-  const { updateProject, deleteProject } = useProjectStore();
+  const { deleteProject, clearCurrentProject } = useProjectStore();
   const { updateStepStatus } = useOnboardingStore();
-  const [isExcelMode, setIsExcelMode] = useState(false);
-  const [excelError, setExcelError] = useState<string | null>(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   const {
     register,
@@ -65,13 +63,11 @@ const PlantConfigPage: React.FC = () => {
           ...data,
           status: 'completed'
         });
-        await updateProject(projectId, { name: data.name });
       } else {
         await createPlantConfig(projectId, {
           ...data,
           status: 'completed'
         });
-        await updateProject(projectId, { name: data.name });
       }
       
       updateStepStatus('plant', 'completed');
@@ -81,49 +77,17 @@ const PlantConfigPage: React.FC = () => {
     }
   };
 
-  const handleExcelUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    setExcelError(null);
-
-    if (file) {
-      try {
-        const data = await parseExcelFile(file);
-        reset({
-          ...data,
-        });
-        setIsExcelMode(false);
-      } catch (error) {
-        setExcelError((error as Error).message);
-      }
-    }
-  };
-
-  const handleTemplateDownload = () => {
-    try {
-      const buffer = generateExcelTemplate();
-      const blob = new Blob([buffer], { 
-        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' 
-      });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = 'plant_config_template.xlsx';
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-    } catch (error) {
-      console.error('Error generating template:', error);
-    }
-  };
-
   const handleDelete = async () => {
     if (!projectId) return;
+    
     try {
+      setDeleteError(null);
       await deleteProject(projectId);
-      navigate('/dashboard');
+      clearCurrentProject(); // Ensure current project is cleared
+      navigate('/dashboard', { replace: true }); // Use replace to prevent back navigation
     } catch (error) {
       console.error('Error deleting project:', error);
+      setDeleteError(error instanceof Error ? error.message : 'Failed to delete project');
     }
   };
 
@@ -133,7 +97,7 @@ const PlantConfigPage: React.FC = () => {
         <div className="mb-6">
           <h2 className="text-2xl font-bold text-gray-900">Plant Configuration</h2>
           <p className="mt-1 text-sm text-gray-500">
-            Configure your plant settings and choose your preferred setup method.
+            Configure your plant settings.
           </p>
         </div>
 
@@ -149,169 +113,95 @@ const PlantConfigPage: React.FC = () => {
         ) : (
           <div className="space-y-6">
             <div className="bg-white shadow-sm rounded-lg p-6">
-              <div className="bg-gray-50 p-4 rounded-lg">
-                <div className="flex items-center space-x-4">
-                  <button
-                    type="button"
-                    onClick={() => setIsExcelMode(false)}
-                    className={`flex-1 py-3 px-4 rounded-lg text-center ${
-                      !isExcelMode
-                        ? 'bg-white shadow-sm border-2 border-blue-500 text-blue-700'
-                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                    }`}
-                  >
-                    Manual Configuration
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setIsExcelMode(true)}
-                    className={`flex-1 py-3 px-4 rounded-lg text-center ${
-                      isExcelMode
-                        ? 'bg-white shadow-sm border-2 border-blue-500 text-blue-700'
-                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                    }`}
-                  >
-                    Excel Import
-                  </button>
-                </div>
-              </div>
-
-              {isExcelMode ? (
-                <div className="mt-6 space-y-6">
-                  <div className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center">
-                    <input
-                      type="file"
-                      accept=".xlsx,.xls"
-                      onChange={handleExcelUpload}
-                      className="hidden"
-                      id="excel-upload"
-                    />
-                    <label
-                      htmlFor="excel-upload"
-                      className="cursor-pointer inline-flex flex-col items-center"
-                    >
-                      <Upload className="h-12 w-12 text-gray-400" />
-                      <span className="mt-2 text-sm font-medium text-gray-900">
-                        Upload Excel Template
-                      </span>
-                      <span className="mt-1 text-sm text-gray-500">
-                        Download our template and fill it with your plant data
-                      </span>
-                    </label>
-                  </div>
-
-                  {excelError && (
-                    <div className="bg-red-50 p-4 rounded-md flex items-start">
-                      <AlertCircle className="h-5 w-5 text-red-400 mt-0.5 mr-2" />
-                      <div>
-                        <h3 className="text-sm font-medium text-red-800">Error processing Excel file</h3>
-                        <p className="mt-1 text-sm text-red-700">{excelError}</p>
-                      </div>
-                    </div>
+              <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
+                <div>
+                  <label htmlFor="name" className="block text-sm font-medium text-gray-700">
+                    Plant Name
+                  </label>
+                  <input
+                    type="text"
+                    id="name"
+                    {...register('name', { required: 'Plant name is required' })}
+                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
+                  />
+                  {errors.name && (
+                    <p className="mt-1 text-sm text-red-600">{errors.name.message}</p>
                   )}
-
-                  <div className="flex justify-center">
-                    <button
-                      type="button"
-                      onClick={handleTemplateDownload}
-                      className="inline-flex items-center px-4 py-2 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
-                    >
-                      <Download className="h-4 w-4 mr-2" />
-                      Download Excel Template
-                    </button>
-                  </div>
                 </div>
-              ) : (
-                <form onSubmit={handleSubmit(onSubmit)} className="mt-6 space-y-6">
-                  <div>
-                    <label htmlFor="name" className="block text-sm font-medium text-gray-700">
-                      Plant Name
-                    </label>
-                    <input
-                      type="text"
-                      id="name"
-                      {...register('name', { required: 'Plant name is required' })}
-                      className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
-                    />
-                    {errors.name && (
-                      <p className="mt-1 text-sm text-red-600">{errors.name.message}</p>
-                    )}
-                  </div>
 
-                  <div>
-                    <label htmlFor="opening_time_minutes" className="block text-sm font-medium text-gray-700">
-                      Daily Opening Time (minutes)
-                    </label>
-                    <div className="mt-1 relative rounded-md shadow-sm">
-                      <input
-                        type="number"
-                        id="opening_time_minutes"
-                        {...register('opening_time_minutes', {
-                          required: 'Opening time is required',
-                          min: { value: 1, message: 'Opening time must be at least 1 minute' },
-                          max: { value: 1440, message: 'Opening time cannot exceed 24 hours' }
-                        })}
-                        className="block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
-                      />
-                      <div className="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none">
-                        <span className="text-gray-500 sm:text-sm">min</span>
-                      </div>
+                <div>
+                  <label htmlFor="opening_time_minutes" className="block text-sm font-medium text-gray-700">
+                    Daily Opening Time (minutes)
+                  </label>
+                  <div className="mt-1 relative rounded-md shadow-sm">
+                    <input
+                      type="number"
+                      id="opening_time_minutes"
+                      {...register('opening_time_minutes', {
+                        required: 'Opening time is required',
+                        min: { value: 1, message: 'Opening time must be at least 1 minute' },
+                        max: { value: 1440, message: 'Opening time cannot exceed 24 hours' }
+                      })}
+                      className="block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
+                    />
+                    <div className="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none">
+                      <span className="text-gray-500 sm:text-sm">min</span>
                     </div>
-                    {errors.opening_time_minutes && (
-                      <p className="mt-1 text-sm text-red-600">{errors.opening_time_minutes.message}</p>
-                    )}
-                    <p className="mt-1 text-sm text-gray-500">Default: 480 minutes (8 hours)</p>
                   </div>
+                  {errors.opening_time_minutes && (
+                    <p className="mt-1 text-sm text-red-600">{errors.opening_time_minutes.message}</p>
+                  )}
+                  <p className="mt-1 text-sm text-gray-500">Default: 480 minutes (8 hours)</p>
+                </div>
 
-                  <div>
-                    <label htmlFor="description" className="block text-sm font-medium text-gray-700">
-                      Description
-                    </label>
-                    <textarea
-                      id="description"
-                      rows={3}
-                      {...register('description')}
-                      className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
-                    />
-                  </div>
+                <div>
+                  <label htmlFor="description" className="block text-sm font-medium text-gray-700">
+                    Description
+                  </label>
+                  <textarea
+                    id="description"
+                    rows={3}
+                    {...register('description')}
+                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
+                  />
+                </div>
 
-                  <div>
-                    <label htmlFor="address" className="block text-sm font-medium text-gray-700">
-                      Plant Address
-                    </label>
-                    <input
-                      type="text"
-                      id="address"
-                      {...register('address', { required: 'Address is required' })}
-                      className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
-                      placeholder="Enter the complete address"
-                    />
-                    {errors.address && (
-                      <p className="mt-1 text-sm text-red-600">{errors.address.message}</p>
-                    )}
-                    <p className="mt-1 text-sm text-gray-500">
-                      Enter the complete address of your plant
-                    </p>
-                  </div>
+                <div>
+                  <label htmlFor="address" className="block text-sm font-medium text-gray-700">
+                    Plant Address
+                  </label>
+                  <input
+                    type="text"
+                    id="address"
+                    {...register('address', { required: 'Address is required' })}
+                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
+                    placeholder="Enter the complete address"
+                  />
+                  {errors.address && (
+                    <p className="mt-1 text-sm text-red-600">{errors.address.message}</p>
+                  )}
+                  <p className="mt-1 text-sm text-gray-500">
+                    Enter the complete address of your plant
+                  </p>
+                </div>
 
-                  <div className="flex justify-end space-x-3">
-                    <button
-                      type="button"
-                      onClick={() => navigate('/dashboard')}
-                      className="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      type="submit"
-                      className="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
-                    >
-                      <Check className="h-4 w-4 mr-2" />
-                      Save and Continue
-                    </button>
-                  </div>
-                </form>
-              )}
+                <div className="flex justify-end space-x-3">
+                  <button
+                    type="button"
+                    onClick={() => navigate('/dashboard')}
+                    className="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+                  >
+                    <Check className="h-4 w-4 mr-2" />
+                    Save and Continue
+                  </button>
+                </div>
+              </form>
             </div>
 
             {/* Danger Zone */}
@@ -362,6 +252,11 @@ const PlantConfigPage: React.FC = () => {
                             All data associated with this project will be permanently deleted.
                           </p>
                         </div>
+                        {deleteError && (
+                          <div className="mt-2 p-2 bg-red-50 rounded-md">
+                            <p className="text-sm text-red-600">{deleteError}</p>
+                          </div>
+                        )}
                       </div>
                     </div>
                     <div className="mt-5 sm:mt-6 sm:grid sm:grid-cols-2 sm:gap-3 sm:grid-flow-row-dense">

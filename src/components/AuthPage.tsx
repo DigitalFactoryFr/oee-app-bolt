@@ -1,12 +1,15 @@
 import React, { useState, useEffect } from 'react';
-import { useSearchParams, useNavigate } from 'react-router-dom';
+import { useSearchParams, useNavigate, useLocation } from 'react-router-dom';
 import { Activity, Mail, Lock, Eye, EyeOff, Linkedin, ArrowLeft } from 'lucide-react';
 import { useAuthStore } from '../store/authStore';
+import { useProjectStore } from '../store/projectStore';
 
 const AuthPage: React.FC = () => {
   const [searchParams] = useSearchParams();
   const mode = searchParams.get('mode') || 'login';
   const navigate = useNavigate();
+  const location = useLocation();
+  const { projects } = useProjectStore();
   
   const { signIn, signUp, user, error: authError } = useAuthStore();
   
@@ -15,6 +18,7 @@ const AuthPage: React.FC = () => {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
+
   
   useEffect(() => {
     // Reset form and errors when mode changes
@@ -24,18 +28,28 @@ const AuthPage: React.FC = () => {
     setError('');
   }, [mode]);
   
-  useEffect(() => {
-    // Redirect to dashboard if user is already logged in
-    if (user) {
-      const state = window.history.state;
-      const from = state?.from?.pathname || '/dashboard';
-      navigate(from);
+ useEffect(() => {
+  console.log("User:", user);
+  console.log("Projects:", projects);
+
+  if (user) {
+    if (projects.length === 0) {
+      console.log("No projects → Redirecting to /projects/new");
+      navigate('/projects/new', { 
+        state: { isFirstProject: true },
+        replace: true 
+      });
+    } else {
+      const from = projects.length > 0 ? "/dashboard" : "/projects/new";
+      console.log("Has projects → Redirecting to", from);
+      navigate(from, { replace: true });
     }
-  }, [user, navigate]);
+  }
+}, [user, projects, navigate, location]);
+
   
   useEffect(() => {
     if (authError) {
-      // Map authentication errors to user-friendly messages
       let userMessage = 'An error occurred during authentication';
       if (authError.includes('Invalid login credentials')) {
         userMessage = 'Invalid email or password';
@@ -49,43 +63,72 @@ const AuthPage: React.FC = () => {
   }, [authError]);
   
   const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setError('');
-    
-    try {
-      // Basic validation
-      if (!email || !password) {
-        setError('Please fill in all fields');
-        return;
-      }
+  e.preventDefault();
+  setError('');
 
-      // Email validation
-      const emailRegex = /^[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}$/i;
-      if (!emailRegex.test(email)) {
-        setError('Please enter a valid email address');
-        return;
-      }
-
-      // Password validation
-      if (password.length < 6) {
-        setError('Password must be at least 6 characters long');
-        return;
-      }
-      
-      if (mode === 'signup') {
-        if (password !== confirmPassword) {
-          setError('Passwords do not match');
-          return;
-        }
-        await signUp(email, password);
-      } else {
-        await signIn(email, password);
-      }
-    } catch (err) {
-      console.error('Authentication error:', err);
-      setError('An unexpected error occurred. Please try again.');
+  try {
+    if (!email || !password) {
+      setError('Please fill in all fields');
+      return;
     }
-  };
+
+    const emailRegex = /^[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}$/i;
+    if (!emailRegex.test(email)) {
+      setError('Please enter a valid email address');
+      return;
+    }
+
+    if (password.length < 6) {
+      setError('Password must be at least 6 characters long');
+      return;
+    }
+
+    if (mode === 'signup') {
+      if (password !== confirmPassword) {
+        setError('Passwords do not match');
+        return;
+      }
+      await signUp(email, password);
+    } else {
+      await signIn(email, password);
+    }
+
+const API_URL = process.env.NODE_ENV === 'production'
+  ? 'https://i40pilot.app/.netlify/functions/send-email'
+  : 'http://localhost:9999/send-email';
+
+async function sendEmail(email, mode) {
+  try {
+    const response = await fetch(API_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        to: email,
+        subject: mode === 'signup' ? 'Welcome to Pilot!' : 'Login Notification',
+        html: `<p>Welcome! You are now authenticated on our platform.</p>`,
+      }),
+    });
+
+    if (!response.ok) {
+      throw new Error(`Erreur API ${response.status}: ${await response.text()}`);
+    }
+
+    const data = await response.json();
+    console.log("🔍 Réponse du serveur:", data);
+  } catch (error) {
+    console.error("❌ Erreur lors de l'envoi de l'email:", error);
+  }
+}
+
+
+
+
+  } catch (err) {
+    console.error('Authentication error:', err);
+    setError('An unexpected error occurred. Please try again.');
+  }
+};
+
   
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col justify-center py-12 sm:px-6 lg:px-8">
@@ -99,7 +142,7 @@ const AuthPage: React.FC = () => {
         </button>
         <div className="flex items-center justify-center">
           <Activity className="h-8 w-8 text-blue-600" />
-          <span className="ml-2 text-xl font-bold text-gray-900">linQ</span>
+          <span className="ml-2 text-xl font-bold text-gray-900">Pilot</span>
         </div>
         <h2 className="mt-6 text-center text-3xl font-extrabold text-gray-900">
           {mode === 'login' ? 'Sign in to your account' : 'Create a new account'}
@@ -208,16 +251,6 @@ const AuthPage: React.FC = () => {
                     className="block w-full pl-10 pr-3 py-2 border border-gray-300 rounded-md leading-5 bg-white placeholder-gray-500 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
                     placeholder="••••••••"
                   />
-                </div>
-              </div>
-            )}
-
-            {mode === 'login' && (
-              <div className="flex items-center justify-end">
-                <div className="text-sm">
-                  <a href="#" className="font-medium text-blue-600 hover:text-blue-500">
-                    Forgot your password?
-                  </a>
                 </div>
               </div>
             )}

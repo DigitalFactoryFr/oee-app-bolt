@@ -29,46 +29,73 @@ export const calculateOEE = (data: ProductionData): OEEMetrics => {
     return metrics;
   }
 
-  // 1. Calcul de la disponibilité
+  // 1. Calcul de l'OEE global d'abord
+  let totalUsefulTime = 0;  // Temps utile total
+  let totalOpeningTime = 0; // Temps d'ouverture total
+
+  data.lots.forEach(lot => {
+    if (lot.products?.cycle_time) {
+      // Calculer le nombre total de pièces (conformes + retouchées)
+      const okParts = lot.ok_parts_produced;
+      
+      // Trouver les retouches pour ce lot
+      const reworkParts = data.quality
+        .filter(issue => 
+          issue.lot_id === lot.id && 
+          (issue.category === 'at_station_rework' || issue.category === 'off_station_rework')
+        )
+        .reduce((sum, issue) => sum + issue.quantity, 0);
+
+      // Calculer le temps utile pour ce lot
+      const totalParts = okParts + reworkParts;
+      const cycleTimeHours = lot.products.cycle_time / 3600; // Convertir en heures
+      totalUsefulTime += totalParts * cycleTimeHours;
+
+      // Ajouter le temps d'ouverture pour ce lot
+      const start = new Date(lot.start_time);
+      const end = lot.end_time ? new Date(lot.end_time) : new Date();
+      const openingTimeHours = (end.getTime() - start.getTime()) / (1000 * 3600); // en heures
+      totalOpeningTime += openingTimeHours;
+    }
+  });
+
+  // Calculer l'OEE global
+  metrics.oee = totalOpeningTime > 0 ? (totalUsefulTime / totalOpeningTime) * 100 : 0;
+
+  // 2. Calcul de la disponibilité (A)
   const plannedDowntime = data.stops
     .filter(stop => stop.failure_type === 'AP')
     .reduce((total, stop) => {
       const start = new Date(stop.start_time);
       const end = stop.end_time ? new Date(stop.end_time) : new Date();
-      return total + (end.getTime() - start.getTime()) / (1000 * 60);
+      return total + (end.getTime() - start.getTime()) / (1000 * 3600); // en heures
     }, 0);
 
-  const availableTime = data.openingTime - plannedDowntime;
-  metrics.availability = (availableTime / data.openingTime) * 100;
+  metrics.availability = totalOpeningTime > 0 
+    ? ((totalOpeningTime - plannedDowntime) / totalOpeningTime) * 100 
+    : 100;
 
-  // 2. Calcul de la performance
-  let totalTheoreticalTime = 0;
-  let totalActualTime = 0;
+  // 3. Calcul de la qualité (Q)
+  let totalProduced = 0;
+  let goodParts = 0;
 
   data.lots.forEach(lot => {
-    if (lot.products?.cycle_time && lot.lot_size > 0) {
-      const theoreticalTime = (lot.products.cycle_time * lot.lot_size) / 60; // en minutes
-      const actualTime = (lot.products.cycle_time * lot.ok_parts_produced) / 60;
-      
-      totalTheoreticalTime += theoreticalTime;
-      totalActualTime += actualTime;
-    }
+    const okParts = lot.ok_parts_produced;
+    const qualityIssues = data.quality
+      .filter(issue => issue.lot_id === lot.id)
+      .reduce((sum, issue) => sum + issue.quantity, 0);
+
+    totalProduced += okParts + qualityIssues;
+    goodParts += okParts;
   });
 
-  if (totalTheoreticalTime > 0) {
-    metrics.performance = (totalActualTime / totalTheoreticalTime) * 100;
-  }
+  metrics.quality = totalProduced > 0 ? (goodParts / totalProduced) * 100 : 100;
 
-  // 3. Calcul de la qualité
-  const totalParts = data.lots.reduce((sum, lot) => sum + lot.lot_size, 0);
-  const goodParts = data.lots.reduce((sum, lot) => sum + lot.ok_parts_produced, 0);
-
-  if (totalParts > 0) {
-    metrics.quality = (goodParts / totalParts) * 100;
-  }
-
-  // 4. Calcul de l'OEE global
-  metrics.oee = (metrics.availability * metrics.performance * metrics.quality) / 10000;
+  // 4. Calcul de la performance (P) à partir de l'OEE, A et Q
+  // P = OEE / (A * Q)
+  metrics.performance = (metrics.availability > 0 && metrics.quality > 0)
+    ? (metrics.oee / (metrics.availability * metrics.quality)) * 10000
+    : 0;
 
   // Limiter toutes les valeurs entre 0 et 100
   Object.keys(metrics).forEach(key => {

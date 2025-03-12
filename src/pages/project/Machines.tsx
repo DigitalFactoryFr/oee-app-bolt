@@ -9,7 +9,7 @@ import { useOnboardingStore } from '../../store/onboardingStore';
 import { parseMachinesExcel, generateMachinesTemplate } from '../../utils/excelParser';
 import MachineFormDialog from '../../components/machines/MachineFormDialog';
 import MachineImportPreview from '../../components/machines/MachineImportPreview';
-import type { Machine, ProductionLine } from '../../types';
+import type { Machine } from '../../types';
 
 interface MachineFormData {
   name: string;
@@ -63,7 +63,7 @@ const MachinesPage: React.FC = () => {
       setValue('name', editingMachine.name);
       setValue('line_id', editingMachine.line_id);
       setValue('description', editingMachine.description || '');
-      setValue('opening_time_minutes', editingMachine.opening_time_minutes);
+      setValue('opening_time_minutes', editingMachine.opening_time_minutes || null);
       setShowFormDialog(true);
     } else {
       reset({
@@ -97,7 +97,6 @@ const MachinesPage: React.FC = () => {
       }, 5000);
     } catch (err) {
       console.error('Error saving machine:', err);
-      setExcelError((err as Error).message);
     }
   };
 
@@ -109,14 +108,8 @@ const MachinesPage: React.FC = () => {
       try {
         const machines = await parseMachinesExcel(file);
         const result = await bulkCreateMachines(projectId, machines);
-        
-        if (result.duplicates.length > 0 || result.created.length > 0) {
-          setImportPreview(result);
-        } else {
-          setExcelError('No valid machines found in the Excel file');
-        }
+        setImportPreview(result);
       } catch (error) {
-        console.error('Error processing Excel:', error);
         setExcelError((error as Error).message);
       }
     }
@@ -231,7 +224,7 @@ const MachinesPage: React.FC = () => {
     }
   };
 
-  const getLineById = (lineId: string): ProductionLine | undefined => {
+  const getLineById = (lineId: string) => {
     return lines.find(line => line.id === lineId);
   };
 

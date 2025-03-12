@@ -9,7 +9,7 @@ const Footer = () => {
           <div className="col-span-1">
             <div className="flex items-center">
               <Activity className="h-8 w-8 text-blue-600" />
-              <span className="ml-2 text-xl font-bold text-gray-900">linQ</span>
+              <span className="ml-2 text-xl font-bold text-gray-900">Pilot</span>
             </div>
             <p className="mt-2 text-sm text-gray-500">
               Complete solution for tracking and optimizing industrial performance.
@@ -126,7 +126,7 @@ const Footer = () => {
             </a>
           </div>
           <p className="mt-8 text-base text-gray-400 md:mt-0 md:order-1">
-            &copy; 2025 linQ. All rights reserved.
+            &copy; 2025 Pilot. All rights reserved.
           </p>
         </div>
       </div>

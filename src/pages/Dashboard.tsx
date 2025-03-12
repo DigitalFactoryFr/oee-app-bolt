@@ -14,7 +14,8 @@ import {
   Activity,
   Gauge,
   ChevronRight,
-  Bell
+  Bell,
+  Cpu
 } from 'lucide-react';
 import DashboardLayout from '../components/layout/DashboardLayout';
 import { useProjectStore } from '../store/projectStore';
@@ -46,9 +47,9 @@ interface Recommendation {
 
 const Dashboard: React.FC = () => {
   const { projects, currentProject, fetchProjects, setCurrentProject } = useProjectStore();
-  const { machines } = useMachineStore();
-  const { products } = useProductStore();
-  const { members } = useTeamStore();
+  const { machines, fetchMachines } = useMachineStore();
+  const { products, fetchProducts } = useProductStore();
+  const { members, fetchMembers } = useTeamStore();
   const [showProjectSelector, setShowProjectSelector] = useState(false);
   const [recentEvents, setRecentEvents] = useState<RecentEvent[]>([]);
   const [recommendations, setRecommendations] = useState<Recommendation[]>([]);
@@ -59,11 +60,19 @@ const Dashboard: React.FC = () => {
   }, [fetchProjects]);
 
   useEffect(() => {
-    if (currentProject) {
-      loadRecentEvents();
-      generateRecommendations();
+    if (currentProject?.id) {
+      const fetchData = async () => {
+        await Promise.all([
+          fetchMachines(currentProject.id),
+          fetchProducts(currentProject.id),
+          fetchMembers(currentProject.id),
+          loadRecentEvents(),
+          generateRecommendations()
+        ]);
+      };
+      fetchData();
     }
-  }, [currentProject]);
+  }, [currentProject?.id]);
 
   const loadRecentEvents = async () => {
     if (!currentProject?.id) return;
@@ -310,6 +319,18 @@ const Dashboard: React.FC = () => {
             <div className="bg-gray-50 rounded-lg p-4">
               <div className="flex items-center">
                 <div className="flex-shrink-0">
+                  <Cpu className="h-6 w-6 text-blue-600" />
+                </div>
+                <div className="ml-4">
+                  <h3 className="text-lg font-medium text-gray-900">Machines</h3>
+                  <p className="text-2xl font-semibold text-blue-600">{machines.length}</p>
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-gray-50 rounded-lg p-4">
+              <div className="flex items-center">
+                <div className="flex-shrink-0">
                   <Package className="h-6 w-6 text-blue-600" />
                 </div>
                 <div className="ml-4">
@@ -327,21 +348,6 @@ const Dashboard: React.FC = () => {
                 <div className="ml-4">
                   <h3 className="text-lg font-medium text-gray-900">Team Members</h3>
                   <p className="text-2xl font-semibold text-blue-600">{members.length}</p>
-                </div>
-              </div>
-            </div>
-
-            <div className="bg-gray-50 rounded-lg p-4">
-              <div className="flex items-center">
-                <div className="flex-shrink-0">
-                  <Gauge className="h-6 w-6 text-blue-600" />
-                </div>
-                <div className="ml-4">
-                  <h3 className="text-lg font-medium text-gray-900">OEE Score</h3>
-                  <div className="flex items-center">
-                    <p className="text-2xl font-semibold text-blue-600">85%</p>
-                    <span className="ml-2 text-sm text-green-600">↑ 2.3%</span>
-                  </div>
                 </div>
               </div>
             </div>
@@ -426,6 +432,11 @@ const Dashboard: React.FC = () => {
                   </div>
                 </div>
               ))}
+              {recentEvents.length === 0 && (
+                <div className="p-4 text-center text-gray-500">
+                  No recent events
+                </div>
+              )}
             </div>
           </div>
 

@@ -1,0 +1,11 @@
+[build]
+  command = "npm install && npm run build"
+  functions = "functions"  # Assurez-vous que les fonctions sont bien stockées ici
+
+[dev]
+  functionsPort = 9999
+
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200

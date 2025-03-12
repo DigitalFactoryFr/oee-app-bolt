@@ -3,7 +3,6 @@ import { supabase } from '../lib/supabase';
 import type { Machine, MachineExcelData } from '../types';
 
 interface ImportResult {
-  success: boolean;
   duplicates: Array<{
     name: string;
     existing: Machine;
@@ -41,7 +40,7 @@ export const useMachineStore = create<MachineState>((set, get) => ({
       if (error) throw error;
 
       const machines = data as Machine[];
-      set({ machines, loading: false });
+      set({ machines, loading: false, error: null });
       return machines;
     } catch (error) {
       console.error('Error fetching machines:', error);
@@ -70,7 +69,8 @@ export const useMachineStore = create<MachineState>((set, get) => ({
       const newMachine = data as Machine;
       set((state) => ({
         machines: [...state.machines, newMachine],
-        loading: false
+        loading: false,
+        error: null
       }));
 
       return newMachine;
@@ -96,7 +96,8 @@ export const useMachineStore = create<MachineState>((set, get) => ({
         machines: state.machines.map(machine =>
           machine.id === id ? { ...machine, ...machineData } : machine
         ),
-        loading: false
+        loading: false,
+        error: null
       }));
     } catch (error) {
       console.error('Error updating machine:', error);
@@ -118,7 +119,8 @@ export const useMachineStore = create<MachineState>((set, get) => ({
 
       set((state) => ({
         machines: state.machines.filter(machine => machine.id !== id),
-        loading: false
+        loading: false,
+        error: null
       }));
     } catch (error) {
       console.error('Error deleting machine:', error);
@@ -130,9 +132,8 @@ export const useMachineStore = create<MachineState>((set, get) => ({
   bulkCreateMachines: async (projectId, machines) => {
     try {
       set({ loading: true, error: null });
-      console.log("🚀 Starting bulk machine creation...");
 
-      // 1. Récupérer toutes les lignes de production
+      // Get all production lines for this project
       const { data: lines, error: linesError } = await supabase
         .from('production_lines')
         .select('id, name')
@@ -144,7 +145,7 @@ export const useMachineStore = create<MachineState>((set, get) => ({
         throw new Error('No production lines found for this project');
       }
 
-      // 2. Récupérer toutes les machines existantes
+      // Get existing machines
       const { data: existingMachines, error: machinesError } = await supabase
         .from('machines')
         .select('*')
@@ -152,7 +153,7 @@ export const useMachineStore = create<MachineState>((set, get) => ({
 
       if (machinesError) throw machinesError;
 
-      // 3. Créer les maps pour la recherche rapide
+      // Create maps for quick lookup
       const linesByName = new Map(lines.map(line => [line.name.toLowerCase(), line]));
       const existingMachinesByKey = new Map();
       
@@ -164,16 +165,14 @@ export const useMachineStore = create<MachineState>((set, get) => ({
         }
       });
 
-      // 4. Préparer les résultats
       const duplicates: Array<{
         name: string;
         existing: Machine;
         new: Partial<Machine>;
       }> = [];
       const created: Machine[] = [];
-      const toCreate: Partial<Machine>[] = [];
 
-      // 5. Traiter chaque machine
+      // Process each machine
       for (const machine of machines) {
         const line = linesByName.get(machine.line_name.toLowerCase());
         
@@ -194,42 +193,36 @@ export const useMachineStore = create<MachineState>((set, get) => ({
             }
           });
         } else {
-          toCreate.push({
-            project_id: projectId,
-            line_id: line.id,
-            name: machine.name,
-            description: machine.description,
-            opening_time_minutes: machine.opening_time_minutes,
-            status: 'in_progress'
-          });
+          const { data, error } = await supabase
+            .from('machines')
+            .insert([{
+              project_id: projectId,
+              line_id: line.id,
+              name: machine.name,
+              description: machine.description,
+              opening_time_minutes: machine.opening_time_minutes,
+              status: 'in_progress'
+            }])
+            .select()
+            .single();
+
+          if (error) throw error;
+          if (data) created.push(data as Machine);
         }
       }
 
-      // 6. Créer les nouvelles machines
-      if (toCreate.length > 0) {
-        const { data, error } = await supabase
-          .from('machines')
-          .insert(toCreate)
-          .select();
-
-        if (error) throw error;
-        if (data) created.push(...(data as Machine[]));
-      }
-
-      // 7. Mettre à jour l'état local
+      // Update local state
       if (created.length > 0) {
         set((state) => ({
           machines: [...state.machines, ...created],
-          loading: false
+          loading: false,
+          error: null
         }));
+      } else {
+        set({ loading: false, error: null });
       }
 
-      return {
-        success: true,
-        duplicates,
-        created
-      };
-
+      return { duplicates, created };
     } catch (error) {
       console.error('Error in bulkCreateMachines:', error);
       set({ error: (error as Error).message, loading: false });
@@ -255,7 +248,8 @@ export const useMachineStore = create<MachineState>((set, get) => ({
           const update = updates.find(u => u.id === existingMachine.id);
           return update ? { ...existingMachine, ...update } : existingMachine;
         }),
-        loading: false
+        loading: false,
+        error: null
       }));
     } catch (error) {
       console.error('Error bulk updating machines:', error);

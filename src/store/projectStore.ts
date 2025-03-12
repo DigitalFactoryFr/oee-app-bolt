@@ -13,9 +13,10 @@ interface ProjectState {
   updateProject: (id: string, data: Partial<Project>) => Promise<void>;
   deleteProject: (id: string) => Promise<void>;
   setCurrentProject: (project: Project | null) => void;
+  clearCurrentProject: () => void;
 }
 
-export const useProjectStore = create<ProjectState>((set, get) => ({
+export const useProjectStore = create<ProjectState>((set) => ({
   projects: [],
   currentProject: null,
   loading: false,
@@ -23,20 +24,39 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   
   setCurrentProject: (project) => {
     set({ currentProject: project });
+    if (project) {
+      localStorage.setItem('currentProject', JSON.stringify(project));
+    } else {
+      localStorage.removeItem('currentProject');
+    }
+  },
+
+  clearCurrentProject: () => {
+    set({ currentProject: null });
+    localStorage.removeItem('currentProject');
   },
   
   fetchProjects: async () => {
     try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        set({ projects: [], loading: false });
+        return;
+      }
+
       set({ loading: true, error: null });
       const { data, error } = await supabase
         .from('projects')
         .select('*')
+        .eq('user_id', user.id)
         .order('created_at', { ascending: false });
       
       if (error) throw error;
       
-      set({ projects: data as Project[], loading: false });
+      const projects = data as Project[];
+      set({ projects, loading: false, error: null });
     } catch (error) {
+      console.error('Error fetching projects:', error);
       set({ error: (error as Error).message, loading: false });
     }
   },
@@ -55,9 +75,11 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       const project = data as Project;
       set({ 
         currentProject: project,
-        loading: false 
+        loading: false,
+        error: null
       });
     } catch (error) {
+      console.error('Error fetching project:', error);
       set({ error: (error as Error).message, loading: false });
     }
   },
@@ -66,20 +88,18 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     try {
       set({ loading: true, error: null });
       
-      const { data: userData } = await supabase.auth.getUser();
-      if (!userData.user) {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
         throw new Error('User not authenticated');
       }
       
-      const newProject = {
-        name,
-        description,
-        user_id: userData.user.id,
-      };
-      
       const { data, error } = await supabase
         .from('projects')
-        .insert([newProject])
+        .insert([{
+          name,
+          description,
+          user_id: user.id
+        }])
         .select()
         .single();
       
@@ -89,11 +109,13 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       set((state) => ({ 
         projects: [project, ...state.projects],
         currentProject: project,
-        loading: false 
+        loading: false,
+        error: null
       }));
       
       return project;
     } catch (error) {
+      console.error('Error creating project:', error);
       set({ error: (error as Error).message, loading: false });
       return null;
     }
@@ -110,7 +132,6 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       
       if (error) throw error;
       
-      // Update local state
       set((state) => {
         const updatedProjects = state.projects.map(project => 
           project.id === id ? { ...project, ...projectData } : project
@@ -121,10 +142,12 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
           currentProject: state.currentProject?.id === id 
             ? { ...state.currentProject, ...projectData }
             : state.currentProject,
-          loading: false 
+          loading: false,
+          error: null
         };
       });
     } catch (error) {
+      console.error('Error updating project:', error);
       set({ error: (error as Error).message, loading: false });
     }
   },
@@ -140,13 +163,14 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       
       if (error) throw error;
       
-      // Update local state
       set((state) => ({ 
         projects: state.projects.filter(project => project.id !== id),
         currentProject: state.currentProject?.id === id ? null : state.currentProject,
-        loading: false 
+        loading: false,
+        error: null
       }));
     } catch (error) {
+      console.error('Error deleting project:', error);
       set({ error: (error as Error).message, loading: false });
     }
   },

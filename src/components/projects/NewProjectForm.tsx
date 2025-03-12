@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useForm } from 'react-hook-form';
 import { useProjectStore } from '../../store/projectStore';
@@ -10,18 +10,32 @@ interface FormData {
 
 const NewProjectForm: React.FC = () => {
   const navigate = useNavigate();
-  const { createProject, error, loading } = useProjectStore();
+  const { createProject } = useProjectStore();
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   
   const { 
     register, 
-    handleSubmit, 
-    formState: { errors } 
+    handleSubmit,
+    formState: { errors }
   } = useForm<FormData>();
   
   const onSubmit = async (data: FormData) => {
-    const project = await createProject(data.name, data.description);
-    if (project) {
-      navigate(`/projects/${project.id}`);
+    if (isSubmitting) return;
+    
+    try {
+      setIsSubmitting(true);
+      setError(null);
+      
+      const project = await createProject(data.name, data.description);
+      if (project) {
+        navigate(`/projects/${project.id}/onboarding/plant`, { replace: true });
+      }
+    } catch (err) {
+      console.error('Error creating project:', err);
+      setError(err instanceof Error ? err.message : 'Failed to create project');
+    } finally {
+      setIsSubmitting(false);
     }
   };
   
@@ -37,6 +51,7 @@ const NewProjectForm: React.FC = () => {
             type="text"
             {...register('name', { required: 'Project name is required' })}
             className="shadow-sm focus:ring-blue-500 focus:border-blue-500 block w-full sm:text-sm border-gray-300 rounded-md"
+            disabled={isSubmitting}
           />
           {errors.name && (
             <p className="mt-1 text-sm text-red-600">{errors.name.message}</p>
@@ -54,6 +69,7 @@ const NewProjectForm: React.FC = () => {
             rows={3}
             {...register('description')}
             className="shadow-sm focus:ring-blue-500 focus:border-blue-500 block w-full sm:text-sm border-gray-300 rounded-md"
+            disabled={isSubmitting}
           />
         </div>
       </div>
@@ -69,20 +85,21 @@ const NewProjectForm: React.FC = () => {
         </div>
       )}
       
-      <div className="flex justify-end">
+      <div className="flex justify-end space-x-3">
         <button
           type="button"
-          onClick={() => navigate('/dashboard')}
+          onClick={() => navigate('/projects/new', { replace: true })}
           className="bg-white py-2 px-4 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+          disabled={isSubmitting}
         >
           Cancel
         </button>
         <button
           type="submit"
-          disabled={loading}
-          className="ml-3 inline-flex justify-center py-2 px-4 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50"
+          disabled={isSubmitting}
+          className="inline-flex items-center justify-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50"
         >
-          {loading ? 'Creating...' : 'Create Project'}
+          {isSubmitting ? 'Creating...' : 'Create Project'}
         </button>
       </div>
     </form>

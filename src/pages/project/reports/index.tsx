@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { format, subDays } from 'date-fns';
-import { Calendar, Download, Filter, ArrowRightLeft, ChevronDown, Activity, Gauge, Package, AlertTriangle, Clock, ChevronRight, Calculator } from 'lucide-react';
+import { Calendar, Download, Filter, ArrowRightLeft, ChevronDown, Activity, Gauge, Package, AlertTriangle, Clock, ChevronRight } from 'lucide-react';
 import ProjectLayout from '../../../components/layout/ProjectLayout';
 import OEEChart from '../../../components/charts/OEEChart';
 import ProductionChart from '../../../components/charts/ProductionChart';
@@ -582,13 +582,6 @@ const ReportsPage: React.FC = () => {
                 description: 'Detailed analysis of Overall Equipment Effectiveness',
                 path: 'oee',
                 icon: Gauge
-              },
-              {
-                id: 'oee-draft',
-                title: 'OEE Draft Calculations',
-                description: 'Experimental OEE calculations with detailed metrics',
-                path: 'oee-draft',
-                icon: Calculator
               },
               {
                 id: 'production',

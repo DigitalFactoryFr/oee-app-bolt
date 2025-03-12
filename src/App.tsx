@@ -37,6 +37,8 @@ import OEEDraft from './pages/project/reports/OEEDraft';
 import ProductionReport from './pages/project/reports/ProductionReport';
 import QualityReport from './pages/project/reports/QualityReport';
 import DowntimeReport from './pages/project/reports/DowntimeReport';
+import PredictiveMaintenance from './pages/project/reports/PredictiveMaintenance';
+import AIAgents from './pages/project/AIAgents';
 
 // Icons for pricing plans
 import { Activity, BarChart3, Cpu, Database, FileSpreadsheet, Gauge, Lock, Server, Settings, Users } from 'lucide-react';
@@ -256,6 +258,19 @@ function App() {
             <RealTimeMonitoring />
           </ProtectedRoute>
         } />
+        <Route path="/projects/:projectId/reports/predictive" element={
+          <ProtectedRoute>
+            <PredictiveMaintenance />
+          </ProtectedRoute>
+        } />
+
+         {/* AI Agents route */}
+        <Route path="/projects/:projectId/ai-agents" element={
+          <ProtectedRoute>
+            <AIAgents />
+          </ProtectedRoute>
+        } />
+
 
         {/* Other project routes */}
         <Route path="/projects/:projectId" element={

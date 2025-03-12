@@ -1,17 +1,23 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Menu, X, Activity } from 'lucide-react';
-import { Link, useLocation } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../store/authStore';
 
 const Header = () => {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const location = useLocation();
-  const { user } = useAuthStore();
+  const navigate = useNavigate();
+  const { user, signOut } = useAuthStore();
 
   // Don't show header on auth pages
   if (location.pathname === '/auth') {
     return null;
   }
+
+  const handleSignOut = async () => {
+    await signOut();
+    navigate('/', { replace: true });
+  };
 
   return (
     <header className="bg-white shadow-sm sticky top-0 z-50">
@@ -19,34 +25,41 @@ const Header = () => {
         <div className="flex justify-between h-16">
           <div className="flex items-center">
             <div className="flex-shrink-0 flex items-center">
-              <Link to="/" className="flex items-center">
+              <Link to={user ? '/projects/new' : '/'} className="flex items-center">
                 <Activity className="h-8 w-8 text-blue-600" />
-                <span className="ml-2 text-xl font-bold text-gray-900">linQ</span>
+                <span className="ml-2 text-xl font-bold text-gray-900">Pilot</span>
               </Link>
             </div>
             <nav className="hidden md:ml-6 md:flex md:space-x-8">
-              <a href="#features" className="text-gray-500 hover:text-gray-900 px-3 py-2 text-sm font-medium">
-                Features
-              </a>
-              <a href="#pricing" className="text-gray-500 hover:text-gray-900 px-3 py-2 text-sm font-medium">
-                Pricing
-              </a>
-              <a href="#about" className="text-gray-500 hover:text-gray-900 px-3 py-2 text-sm font-medium">
-                About
-              </a>
-              <a href="#contact" className="text-gray-500 hover:text-gray-900 px-3 py-2 text-sm font-medium">
-                Contact
-              </a>
+              {!user && (
+                <>
+                  <a href="#features" className="text-gray-500 hover:text-gray-900 px-3 py-2 text-sm font-medium">
+                    Features
+                  </a>
+                  <a href="#pricing" className="text-gray-500 hover:text-gray-900 px-3 py-2 text-sm font-medium">
+                    Pricing
+                  </a>
+                  <a href="#about" className="text-gray-500 hover:text-gray-900 px-3 py-2 text-sm font-medium">
+                    About
+                  </a>
+                  <a href="#contact" className="text-gray-500 hover:text-gray-900 px-3 py-2 text-sm font-medium">
+                    Contact
+                  </a>
+                </>
+              )}
             </nav>
           </div>
           <div className="hidden md:flex items-center">
             {user ? (
-              <Link
-                to="/dashboard"
-                className="ml-4 px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-md"
-              >
-                Dashboard
-              </Link>
+              <div className="flex items-center space-x-4">
+                <span className="text-gray-700">{user.email}</span>
+                <button
+                  onClick={handleSignOut}
+                  className="ml-4 px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-md"
+                >
+                  Sign out
+                </button>
+              </div>
             ) : (
               <>
                 <Link
@@ -82,44 +95,46 @@ const Header = () => {
         </div>
       </div>
 
-      {/* Mobile menu, show/hide based on menu state */}
+      {/* Mobile menu */}
       {isMenuOpen && (
         <div className="md:hidden">
-          <div className="pt-2 pb-3 space-y-1">
-            <a
-              href="#features"
-              className="block pl-3 pr-4 py-2 text-base font-medium text-gray-500 hover:text-gray-900 hover:bg-gray-50"
-            >
-              Features
-            </a>
-            <a
-              href="#pricing"
-              className="block pl-3 pr-4 py-2 text-base font-medium text-gray-500 hover:text-gray-900 hover:bg-gray-50"
-            >
-              Pricing
-            </a>
-            <a
-              href="#about"
-              className="block pl-3 pr-4 py-2 text-base font-medium text-gray-500 hover:text-gray-900 hover:bg-gray-50"
-            >
-              About
-            </a>
-            <a
-              href="#contact"
-              className="block pl-3 pr-4 py-2 text-base font-medium text-gray-500 hover:text-gray-900 hover:bg-gray-50"
-            >
-              Contact
-            </a>
-          </div>
+          {!user && (
+            <div className="pt-2 pb-3 space-y-1">
+              <a
+                href="#features"
+                className="block pl-3 pr-4 py-2 text-base font-medium text-gray-500 hover:text-gray-900 hover:bg-gray-50"
+              >
+                Features
+              </a>
+              <a
+                href="#pricing"
+                className="block pl-3 pr-4 py-2 text-base font-medium text-gray-500 hover:text-gray-900 hover:bg-gray-50"
+              >
+                Pricing
+              </a>
+              <a
+                href="#about"
+                className="block pl-3 pr-4 py-2 text-base font-medium text-gray-500 hover:text-gray-900 hover:bg-gray-50"
+              >
+                About
+              </a>
+              <a
+                href="#contact"
+                className="block pl-3 pr-4 py-2 text-base font-medium text-gray-500 hover:text-gray-900 hover:bg-gray-50"
+              >
+                Contact
+              </a>
+            </div>
+          )}
           <div className="pt-4 pb-3 border-t border-gray-200">
             <div className="flex items-center px-4">
               {user ? (
-                <Link
-                  to="/dashboard"
+                <button
+                  onClick={handleSignOut}
                   className="block px-4 py-2 text-base font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-md w-full text-center"
                 >
-                  Dashboard
-                </Link>
+                  Sign out
+                </button>
               ) : (
                 <>
                   <Link

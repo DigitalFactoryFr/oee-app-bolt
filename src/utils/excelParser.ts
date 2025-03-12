@@ -10,7 +10,10 @@ export const parseExcelFile = async (file: File): Promise<PlantExcelData> => {
         const data = new Uint8Array(e.target?.result as ArrayBuffer);
         const workbook = XLSX.read(data, { type: 'array' });
         const worksheet = workbook.Sheets[workbook.SheetNames[0]];
+
+        
         const jsonData = XLSX.utils.sheet_to_json(worksheet);
+console.log('Machines JSON Data:', jsonData);
 
         if (jsonData.length === 0) {
           throw new Error('Excel file is empty');
@@ -117,6 +120,7 @@ export const parseProductionLinesExcel = async (file: File): Promise<ProductionL
   });
 };
 
+
 export const parseMachinesExcel = async (file: File): Promise<MachineExcelData[]> => {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -130,47 +134,92 @@ export const parseMachinesExcel = async (file: File): Promise<MachineExcelData[]
         const data = new Uint8Array(e.target.result as ArrayBuffer);
         const workbook = XLSX.read(data, { type: 'array' });
 
+        // Vérifier qu'il y a au moins une feuille
         if (!workbook.SheetNames.length) {
           throw new Error('Excel file is empty');
         }
 
-        const worksheet = workbook.Sheets[workbook.SheetNames[0]];
+        // Sélectionner l'onglet "Machines" si disponible, sinon prendre le premier
+        const sheetName = workbook.SheetNames.find(
+          (name) => name.toLowerCase() === 'machines'
+        ) || workbook.SheetNames[0];
+
+        const worksheet = workbook.Sheets[sheetName];
         const jsonData = XLSX.utils.sheet_to_json(worksheet);
 
-        console.log("📊 Raw Excel data:", jsonData);
-
+        // Vérifier qu'il y a des lignes
         if (!Array.isArray(jsonData) || jsonData.length === 0) {
           throw new Error('No data found in Excel file');
         }
 
-        const machines: MachineExcelData[] = jsonData.map((row: any, index) => {
-          if (!row.name || !row.line_name) {
-            throw new Error(`Row ${index + 2}: Name and line_name are required`);
+        const machines: MachineExcelData[] = [];
+        const machineKeys = new Set<string>();
+
+        jsonData.forEach((row, index) => {
+          const rowData = row as any;
+
+          // Vérifier si la ligne est entièrement vide (pour éviter l'erreur sur des lignes "fantômes")
+          const hasData = Object.values(rowData).some(
+            (val) => val !== null && val !== undefined && String(val).trim() !== ''
+          );
+          if (!hasData) {
+            // Ligne vide : on l'ignore et on passe à la suivante
+            return;
           }
 
-          let openingTime: number | undefined;
-          if (row.opening_time_minutes !== undefined) {
-            openingTime = Number(row.opening_time_minutes);
-            if (isNaN(openingTime) || openingTime <= 0 || openingTime > 1440) {
+          // Champs obligatoires
+          const requiredFields = ['name', 'line_name'];
+          const missingFields = requiredFields.filter((field) => !rowData[field]);
+
+          if (missingFields.length > 0) {
+              throw new Error(`Row is missing required fields: ${missingFields.join(', ')}`);
+            }
+
+               // S'assurer que les valeurs sont bien des chaînes et ne sont pas undefined
+          const name = rowData.name ? String(rowData.name).trim() : "";
+          const lineName = rowData.line_name ? String(rowData.line_name).trim() : "";
+          
+          // Vérifier si les champs obligatoires sont bien renseignés
+          if (!name || !lineName) {
+            throw new Error(`Missing required fields: Machine name or line name is empty`);
+          }
+          
+          // Construction de la clé en minuscules pour éviter les doublons
+          const key = `${lineName.toLowerCase()}-${name.toLowerCase()}`;
+          
+          // Vérifier les doublons (machine + ligne)
+          if (machineKeys.has(key)) {
+            throw new Error(
+              `Duplicate machine name "${name}" found for line "${lineName}"`
+            );
+          }
+
+        // Ajouter la machine aux clés existantes
+        machineKeys.add(key);
+
+
+          // Convertir et valider le temps d'ouverture si présent
+          let openingTime: number | undefined = undefined;
+          if (rowData.opening_time_minutes !== undefined && rowData.opening_time_minutes !== '') {
+            const ot = Number(rowData.opening_time_minutes);
+            if (isNaN(ot) || ot <= 0 || ot > 1440) {
               throw new Error(
-                `Row ${index + 2}: Invalid opening time value (must be between 1 and 1440)`
+                `Row ${index + 2}: Invalid opening_time_minutes for machine "${name}" (must be between 1 and 1440)`
               );
             }
+            openingTime = ot;
           }
 
-          return {
-            name: String(row.name).trim(),
-            line_name: String(row.line_name).trim(),
-            description: row.description ? String(row.description).trim() : undefined,
-            opening_time_minutes: openingTime
-          };
+          machines.push({
+            name,
+            line_name: lineName,
+            description: rowData.description ? String(rowData.description).trim() : undefined,
+            opening_time_minutes: openingTime,
+          });
         });
 
-        console.log("✅ Parsed machines:", machines);
         resolve(machines);
-
       } catch (error) {
-        console.error("❌ Error parsing Excel:", error);
         reject(error);
       }
     };
@@ -182,6 +231,10 @@ export const parseMachinesExcel = async (file: File): Promise<MachineExcelData[]
     reader.readAsArrayBuffer(file);
   });
 };
+
+
+
+
 
 export const generateExcelTemplate = () => {
   const template = [
