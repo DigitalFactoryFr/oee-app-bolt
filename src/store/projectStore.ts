@@ -50,7 +50,14 @@ export const useProjectStore = create<ProjectState>((set) => ({
       const { data, error } = await supabase
         .from('projects')
         .select('*')
-        .eq('user_id', user.id)
+        .or(`user_id.eq.${user.id},id.in.(${
+          supabase
+            .from('team_members')
+            .select('project_id')
+            .eq('email', user.email)
+            .eq('status', 'active')
+            .then(({ data }) => data?.map(d => d.project_id).join(','))
+        })`)
         .order('created_at', { ascending: false });
       
       if (error) {
@@ -119,13 +126,6 @@ export const useProjectStore = create<ProjectState>((set) => ({
       
       if (error) {
         console.error("❌ Error creating project:", error);
-        if (error.message.includes('infinite recursion')) {
-          console.error("🔄 Infinite recursion detected in policy. Details:", {
-            error: error.message,
-            hint: error.hint,
-            details: error.details
-          });
-        }
         throw error;
       }
       
