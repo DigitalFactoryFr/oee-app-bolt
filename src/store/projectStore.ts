@@ -38,8 +38,10 @@ export const useProjectStore = create<ProjectState>((set) => ({
   
   fetchProjects: async () => {
     try {
+      console.log("🔍 Fetching projects...");
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) {
+        console.log("❌ No user found, clearing projects");
         set({ projects: [], loading: false });
         return;
       }
@@ -51,8 +53,12 @@ export const useProjectStore = create<ProjectState>((set) => ({
         .eq('user_id', user.id)
         .order('created_at', { ascending: false });
       
-      if (error) throw error;
+      if (error) {
+        console.error("❌ Error fetching projects:", error);
+        throw error;
+      }
       
+      console.log("✅ Projects fetched successfully:", data?.length || 0, "projects");
       const projects = data as Project[];
       set({ projects, loading: false, error: null });
     } catch (error) {
@@ -63,6 +69,7 @@ export const useProjectStore = create<ProjectState>((set) => ({
   
   fetchProject: async (id) => {
     try {
+      console.log("🔍 Fetching project:", id);
       set({ loading: true, error: null });
       const { data, error } = await supabase
         .from('projects')
@@ -70,8 +77,12 @@ export const useProjectStore = create<ProjectState>((set) => ({
         .eq('id', id)
         .single();
       
-      if (error) throw error;
+      if (error) {
+        console.error("❌ Error fetching project:", error);
+        throw error;
+      }
       
+      console.log("✅ Project fetched successfully:", data?.name);
       const project = data as Project;
       set({ 
         currentProject: project,
@@ -86,13 +97,16 @@ export const useProjectStore = create<ProjectState>((set) => ({
   
   createProject: async (name, description = '') => {
     try {
+      console.log("🚀 Creating new project:", { name, description });
       set({ loading: true, error: null });
       
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) {
+        console.error("❌ Error: User not authenticated");
         throw new Error('User not authenticated');
       }
       
+      console.log("👤 Creating project for user:", user.id);
       const { data, error } = await supabase
         .from('projects')
         .insert([{
@@ -103,8 +117,19 @@ export const useProjectStore = create<ProjectState>((set) => ({
         .select()
         .single();
       
-      if (error) throw error;
+      if (error) {
+        console.error("❌ Error creating project:", error);
+        if (error.message.includes('infinite recursion')) {
+          console.error("🔄 Infinite recursion detected in policy. Details:", {
+            error: error.message,
+            hint: error.hint,
+            details: error.details
+          });
+        }
+        throw error;
+      }
       
+      console.log("✅ Project created successfully:", data);
       const project = data as Project;
       set((state) => ({ 
         projects: [project, ...state.projects],
@@ -123,6 +148,7 @@ export const useProjectStore = create<ProjectState>((set) => ({
   
   updateProject: async (id, projectData) => {
     try {
+      console.log("📝 Updating project:", id, projectData);
       set({ loading: true, error: null });
       
       const { error } = await supabase
@@ -130,8 +156,12 @@ export const useProjectStore = create<ProjectState>((set) => ({
         .update(projectData)
         .eq('id', id);
       
-      if (error) throw error;
+      if (error) {
+        console.error("❌ Error updating project:", error);
+        throw error;
+      }
       
+      console.log("✅ Project updated successfully");
       set((state) => {
         const updatedProjects = state.projects.map(project => 
           project.id === id ? { ...project, ...projectData } : project
@@ -154,6 +184,7 @@ export const useProjectStore = create<ProjectState>((set) => ({
   
   deleteProject: async (id) => {
     try {
+      console.log("🗑️ Deleting project:", id);
       set({ loading: true, error: null });
       
       const { error } = await supabase
@@ -161,8 +192,12 @@ export const useProjectStore = create<ProjectState>((set) => ({
         .delete()
         .eq('id', id);
       
-      if (error) throw error;
+      if (error) {
+        console.error("❌ Error deleting project:", error);
+        throw error;
+      }
       
+      console.log("✅ Project deleted successfully");
       set((state) => ({ 
         projects: state.projects.filter(project => project.id !== id),
         currentProject: state.currentProject?.id === id ? null : state.currentProject,

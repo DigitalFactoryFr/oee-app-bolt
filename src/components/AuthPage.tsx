@@ -8,6 +8,7 @@ import SocialAuth from './SocialAuth';
 const AuthPage: React.FC = () => {
   const [searchParams] = useSearchParams();
   const mode = searchParams.get('mode') || 'login';
+  const returnTo = searchParams.get('returnTo');
   const navigate = useNavigate();
   const location = useLocation();
   const { projects } = useProjectStore();
@@ -29,17 +30,20 @@ const AuthPage: React.FC = () => {
   
   useEffect(() => {
     if (user) {
-      if (projects.length === 0) {
-        navigate('/projects/new', { 
-          state: { isFirstProject: true },
-          replace: true 
-        });
-      } else {
-        const from = projects.length > 0 ? "/dashboard" : "/projects/new";
-        navigate(from, { replace: true });
+      // If returnTo is set, navigate there
+      if (returnTo) {
+        navigate(returnTo);
+      }
+      // Otherwise, if no projects, go to new project page
+      else if (projects.length === 0) {
+        navigate('/projects/new', { replace: true });
+      }
+      // Otherwise go to dashboard
+      else {
+        navigate('/dashboard', { replace: true });
       }
     }
-  }, [user, projects, navigate, location]);
+  }, [user, projects, navigate, returnTo]);
   
   useEffect(() => {
     if (authError) {
@@ -90,32 +94,6 @@ const AuthPage: React.FC = () => {
     } catch (err) {
       console.error('Authentication error:', err);
       setError('An unexpected error occurred. Please try again.');
-    }
-  };
-
-  const API_URL = process.env.NODE_ENV === 'production'
-    ? 'https://oee-app-bolt.onrender.com/send-email'
-    : 'http://localhost:5000/send-email';
-
-  const sendEmail = async (email: string) => {
-    try {
-      const response = await fetch(API_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          to: email,
-          subject: 'Welcome to Pilot!',
-          html: `<p>Welcome! You are now authenticated on our platform.</p>`,
-        }),
-      });
-
-      if (!response.ok) {
-        throw new Error(`API Error ${response.status}: ${await response.text()}`);
-      }
-
-      console.log("✅ Confirmation email sent!");
-    } catch (error) {
-      console.error("❌ Error sending email:", error);
     }
   };
   

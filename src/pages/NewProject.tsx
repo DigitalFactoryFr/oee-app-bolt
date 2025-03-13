@@ -20,9 +20,10 @@ const NewProject: React.FC = () => {
   } = useForm<FormData>();
   
   const onSubmit = async (data: FormData) => {
+    console.log("📝 Submitting project form:", data);
     const project = await createProject(data.name, data.description);
     if (project) {
-      // Redirect to plant configuration page instead of project page
+      console.log("✅ Project created successfully, redirecting to onboarding");
       navigate(`/projects/${project.id}/onboarding/plant`);
     }
   };
@@ -75,7 +76,21 @@ const NewProject: React.FC = () => {
                 <div className="flex">
                   <div className="ml-3">
                     <h3 className="text-sm font-medium text-red-800">Error creating project</h3>
-                    <div className="mt-2 text-sm text-red-700">{error}</div>
+                    <div className="mt-2 text-sm text-red-700">
+                      {error}
+                      {error.includes('infinite recursion') && (
+                        <div className="mt-2 text-xs text-red-600">
+                          <p>A database policy recursion error occurred. Details:</p>
+                          <pre className="mt-1 bg-red-100 p-2 rounded overflow-auto">
+                            {JSON.stringify({
+                              message: error,
+                              timestamp: new Date().toISOString(),
+                              location: 'Project creation'
+                            }, null, 2)}
+                          </pre>
+                        </div>
+                      )}
+                    </div>
                   </div>
                 </div>
               </div>

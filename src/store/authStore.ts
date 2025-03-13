@@ -16,7 +16,7 @@ interface AuthState {
 
 export const useAuthStore = create<AuthState>((set) => ({
   user: null,
-  loading: true,
+  loading: false,
   error: null,
   
   signIn: async (email, password) => {
@@ -49,6 +49,9 @@ export const useAuthStore = create<AuthState>((set) => ({
       const { data, error } = await supabase.auth.signUp({
         email,
         password,
+        options: {
+          emailRedirectTo: 'https://i40pilot.app/auth/callback'
+        }
       });
       
       if (error) throw error;
@@ -118,7 +121,6 @@ export const useAuthStore = create<AuthState>((set) => ({
       });
 
       if (error) throw error;
-
     } catch (error) {
       set({ error: (error as Error).message, loading: false });
     }

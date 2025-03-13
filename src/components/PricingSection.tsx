@@ -1,9 +1,9 @@
 import React from "react";
 import { Check } from "lucide-react";
-import { loadStripe } from "@stripe/stripe-js";
+import { useSubscriptionStore } from '../store/subscriptionStore';
+import { loadStripe } from '@stripe/stripe-js';
 
-// Initialize Stripe with public key
-const stripePromise = loadStripe("pk_live_51R1mHfG3UtTNBuRxHWDBd3y73w3NmrCyrclE4nyNzMuj9KCkAkX7GzdFnpAD2m7NJ6XMSY1TDajYohs07UKOVifw00ZbomCm91"); 
+const stripePromise = loadStripe("pk_live_51R1mHfG3UtTNBuRxHWDBd3y73w3NmrCyrclE4nyNzMuj9KCkAkX7GzdFnpAD2m7NJ6XMSY1TDajYohs07UKOVifw00ZbomCm91");
 
 interface Feature {
   text: string;
@@ -16,48 +16,42 @@ interface PricingPlan {
   price: string;
   period: string;
   description: string;
-  priceId: string;
   features: Feature[];
   cta: string;
   highlighted: boolean;
 }
 
-// Function to call Stripe Checkout
-const handleCheckout = async (priceId: string) => {
-  if (!priceId) return;
+const PricingSection = () => {
+  const { startCheckout } = useSubscriptionStore();
 
-  const stripe = await stripePromise;
-  
-  const response = await fetch("https://i40pilot.app/.netlify/functions/create-checkout-session", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ priceId }),
-  });
+  const handleCheckout = async (machineCount: number) => {
+    try {
+      const sessionId = await startCheckout(machineCount);
+      const stripe = await stripePromise;
+      if (stripe) {
+        await stripe.redirectToCheckout({ sessionId });
+      }
+    } catch (error) {
+      console.error('Error starting checkout:', error);
+    }
+  };
 
-  const session = await response.json();
-  if (stripe) {
-    await stripe.redirectToCheckout({ sessionId: session.id });
-  }
-};
-
-const PricingSection: React.FC = () => {
-  const plans = [
+  const plans: PricingPlan[] = [
     {
       name: "Free",
       subtitle: "Starter",
       price: "€0",
       period: "forever",
       description: "Perfect for small businesses starting with OEE tracking",
-      priceId: "", // Free plan, no payment needed
       features: [
         { text: "1 production line", icon: <Check className="h-4 w-4" /> },
         { text: "Up to 3 machines", icon: <Check className="h-4 w-4" /> },
+        { text: "1 user", icon: <Check className="h-4 w-4" /> },
         { text: "Basic OEE dashboard", icon: <Check className="h-4 w-4" /> },
         { text: "Excel import/export", icon: <Check className="h-4 w-4" /> },
-        { text: "Community support", icon: <Check className="h-4 w-4" /> },
       ],
       cta: "Start for free",
-      highlighted: false
+      highlighted: false,
     },
     {
       name: "Pro",
@@ -65,16 +59,16 @@ const PricingSection: React.FC = () => {
       price: "€39",
       period: "per machine/month",
       description: "For businesses looking to optimize their production",
-      priceId: "price_1R1mtMG3UtTNBuRxjn3sSpoq",
       features: [
         { text: "Unlimited production lines", icon: <Check className="h-4 w-4" /> },
         { text: "Pay per machine", icon: <Check className="h-4 w-4" /> },
-        { text: "Advanced analytics", icon: <Check className="h-4 w-4" /> },
-        { text: "Machine connectivity", icon: <Check className="h-4 w-4" /> },
-        { text: "Priority support", icon: <Check className="h-4 w-4" /> },
+        { text: "Advanced user management", icon: <Check className="h-4 w-4" /> },
+        { text: "Machine connectivity (MQTT, SQL, REST API)", icon: <Check className="h-4 w-4" /> },
+        { text: "Advanced dashboard with detailed KPIs", icon: <Check className="h-4 w-4" /> },
+        { text: "Export to Excel, Power BI, ERP API", icon: <Check className="h-4 w-4" /> },
       ],
-      cta: "Start 14-day trial",
-      highlighted: true
+      cta: "14-day free trial",
+      highlighted: true,
     },
     {
       name: "Enterprise",
@@ -82,15 +76,14 @@ const PricingSection: React.FC = () => {
       price: "Custom",
       period: "contact us",
       description: "Complete solution for large industrial enterprises",
-      priceId: "", // Custom pricing, no direct payment
       features: [
         { text: "All Pro features", icon: <Check className="h-4 w-4" /> },
-        { text: "On-premise deployment", icon: <Check className="h-4 w-4" /> },
-        { text: "Custom integrations", icon: <Check className="h-4 w-4" /> },
-        { text: "Dedicated support", icon: <Check className="h-4 w-4" /> },
+        { text: "On-premise server installation", icon: <Check className="h-4 w-4" /> },
+        { text: "Advanced configuration and full data access", icon: <Check className="h-4 w-4" /> },
+        { text: "Dedicated support & custom integration", icon: <Check className="h-4 w-4" /> },
       ],
       cta: "Contact us",
-      highlighted: false
+      highlighted: false,
     }
   ];
 
@@ -131,16 +124,16 @@ const PricingSection: React.FC = () => {
                 </p>
                 <p className="mt-4 text-sm text-gray-500">{plan.description}</p>
 
-                {plan.priceId ? (
+                {plan.name === 'Pro' ? (
                   <button
-                    onClick={() => handleCheckout(plan.priceId)}
+                    onClick={() => handleCheckout(1)}
                     className="mt-8 block w-full py-3 px-6 border border-transparent rounded-md text-center font-medium bg-blue-600 text-white hover:bg-blue-700"
                   >
                     {plan.cta}
                   </button>
                 ) : (
                   <a
-                    href="#contact"
+                    href={plan.name === 'Free' ? '/auth?mode=signup' : '#contact'}
                     className="mt-8 block w-full py-3 px-6 border border-transparent rounded-md text-center font-medium bg-blue-50 text-blue-700 hover:bg-blue-100"
                   >
                     {plan.cta}

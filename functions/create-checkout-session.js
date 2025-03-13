@@ -38,6 +38,9 @@ exports.handler = async (event) => {
       }],
       success_url: `${process.env.SITE_URL}/success?session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${process.env.SITE_URL}/cancel`,
+      metadata: {
+        machineCount: machineCount.toString()
+      }
     });
 
     return { 

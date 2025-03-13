@@ -8,6 +8,7 @@ import Hero from './components/Hero';
 import PricingSection from './components/PricingSection';
 import Footer from './components/Footer';
 import AuthPage from './components/AuthPage';
+import AuthCallback from './components/AuthCallback';
 import Dashboard from './pages/Dashboard';
 import NewProject from './pages/NewProject';
 import About from './pages/About';
@@ -41,6 +42,9 @@ import QualityReport from './pages/project/reports/QualityReport';
 import DowntimeReport from './pages/project/reports/DowntimeReport';
 import PredictiveMaintenance from './pages/project/reports/PredictiveMaintenance';
 import AIAgents from './pages/project/AIAgents';
+import InvitePage from './pages/InvitePage';
+import CheckoutSuccessPage from './pages/CheckoutSuccessPage';
+import CheckoutCancelPage from './pages/CheckoutCancelPage';
 
 function App() {
   const { getUser } = useAuthStore();
@@ -62,8 +66,12 @@ function App() {
           </div>
         } />
         <Route path="/auth" element={<AuthPage />} />
+        <Route path="/auth/callback" element={<AuthCallback />} />
         <Route path="/about" element={<About />} />
         <Route path="/contact" element={<Contact />} />
+        <Route path="/invite/:inviteId" element={<InvitePage />} />
+        <Route path="/success" element={<CheckoutSuccessPage />} />
+        <Route path="/cancel" element={<CheckoutCancelPage />} />
         
         {/* Protected routes */}
         <Route path="/dashboard" element={
