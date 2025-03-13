@@ -10,6 +10,8 @@ import Footer from './components/Footer';
 import AuthPage from './components/AuthPage';
 import Dashboard from './pages/Dashboard';
 import NewProject from './pages/NewProject';
+import About from './pages/About';
+import Contact from './pages/Contact';
 import Factory from './pages/project/Factory';
 import ProductionLine from './pages/project/ProductionLine';
 import Products from './pages/project/Products';
@@ -40,66 +42,12 @@ import DowntimeReport from './pages/project/reports/DowntimeReport';
 import PredictiveMaintenance from './pages/project/reports/PredictiveMaintenance';
 import AIAgents from './pages/project/AIAgents';
 
-// Icons for pricing plans
-import { Activity, BarChart3, Cpu, Database, FileSpreadsheet, Gauge, Lock, Server, Settings, Users } from 'lucide-react';
-
 function App() {
   const { getUser } = useAuthStore();
 
   React.useEffect(() => {
     getUser();
   }, [getUser]);
-
-  const pricingPlans = [
-    {
-      name: "Free",
-      subtitle: "Starter",
-      price: "$0",
-      period: "forever",
-      description: "Ideal for small businesses starting with OEE tracking",
-      features: [
-        { text: "1 production line", icon: <Activity size={18} /> },
-        { text: "30 entries per day", icon: <Database size={18} /> },
-        { text: "1 user", icon: <Users size={18} /> },
-        { text: "Basic OEE dashboard", icon: <BarChart3 size={18} /> },
-        { text: "Excel import/export", icon: <FileSpreadsheet size={18} /> },
-      ],
-      cta: "Start for free",
-      highlighted: false
-    },
-    {
-      name: "Pro",
-      subtitle: "SaaS – Monthly subscription",
-      price: "$99",
-      period: "per month",
-      description: "For businesses looking to optimize their production",
-      features: [
-        { text: "Unlimited production lines", icon: <Activity size={18} /> },
-        { text: "Unlimited entries", icon: <Database size={18} /> },
-        { text: "Advanced user management", icon: <Users size={18} /> },
-        { text: "Machine connectivity (MQTT, SQL, REST API)", icon: <Cpu size={18} /> },
-        { text: "Advanced dashboard with detailed KPIs", icon: <BarChart3 size={18} /> },
-        { text: "Export to Excel, Power BI, ERP API", icon: <FileSpreadsheet size={18} /> },
-      ],
-      cta: "14-day free trial",
-      highlighted: true
-    },
-    {
-      name: "Enterprise",
-      subtitle: "On-Premise",
-      price: "Custom",
-      period: "contact us",
-      description: "Complete solution for large industrial enterprises",
-      features: [
-        { text: "All Pro features", icon: <Settings size={18} /> },
-        { text: "On-premise server installation", icon: <Server size={18} /> },
-        { text: "Advanced configuration and full data access", icon: <Lock size={18} /> },
-        { text: "Dedicated support & custom integration", icon: <Gauge size={18} /> },
-      ],
-      cta: "Contact us",
-      highlighted: false
-    }
-  ];
 
   return (
     <Router>
@@ -109,11 +57,13 @@ function App() {
           <div className="min-h-screen bg-gradient-to-b from-gray-50 to-gray-100">
             <Header />
             <Hero />
-            <PricingSection plans={pricingPlans} />
+            <PricingSection />
             <Footer />
           </div>
         } />
         <Route path="/auth" element={<AuthPage />} />
+        <Route path="/about" element={<About />} />
+        <Route path="/contact" element={<Contact />} />
         
         {/* Protected routes */}
         <Route path="/dashboard" element={
@@ -264,13 +214,12 @@ function App() {
           </ProtectedRoute>
         } />
 
-         {/* AI Agents route */}
+        {/* AI Agents route */}
         <Route path="/projects/:projectId/ai-agents" element={
           <ProtectedRoute>
             <AIAgents />
           </ProtectedRoute>
         } />
-
 
         {/* Other project routes */}
         <Route path="/projects/:projectId" element={

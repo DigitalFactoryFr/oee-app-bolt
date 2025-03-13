@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { Menu, X, Activity } from 'lucide-react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../store/authStore';
@@ -25,7 +25,7 @@ const Header = () => {
         <div className="flex justify-between h-16">
           <div className="flex items-center">
             <div className="flex-shrink-0 flex items-center">
-              <Link to={user ? '/projects/new' : '/'} className="flex items-center">
+              <Link to={user ? '/dashboard' : '/'} className="flex items-center">
                 <Activity className="h-8 w-8 text-blue-600" />
                 <span className="ml-2 text-xl font-bold text-gray-900">Pilot</span>
               </Link>
@@ -39,12 +39,12 @@ const Header = () => {
                   <a href="#pricing" className="text-gray-500 hover:text-gray-900 px-3 py-2 text-sm font-medium">
                     Pricing
                   </a>
-                  <a href="#about" className="text-gray-500 hover:text-gray-900 px-3 py-2 text-sm font-medium">
+                  <Link to="/about" className="text-gray-500 hover:text-gray-900 px-3 py-2 text-sm font-medium">
                     About
-                  </a>
-                  <a href="#contact" className="text-gray-500 hover:text-gray-900 px-3 py-2 text-sm font-medium">
+                  </Link>
+                  <Link to="/contact" className="text-gray-500 hover:text-gray-900 px-3 py-2 text-sm font-medium">
                     Contact
-                  </a>
+                  </Link>
                 </>
               )}
             </nav>
@@ -112,18 +112,18 @@ const Header = () => {
               >
                 Pricing
               </a>
-              <a
-                href="#about"
+              <Link
+                to="/about"
                 className="block pl-3 pr-4 py-2 text-base font-medium text-gray-500 hover:text-gray-900 hover:bg-gray-50"
               >
                 About
-              </a>
-              <a
-                href="#contact"
+              </Link>
+              <Link
+                to="/contact"
                 className="block pl-3 pr-4 py-2 text-base font-medium text-gray-500 hover:text-gray-900 hover:bg-gray-50"
               >
                 Contact
-              </a>
+              </Link>
             </div>
           )}
           <div className="pt-4 pb-3 border-t border-gray-200">

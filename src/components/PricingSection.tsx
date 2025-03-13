@@ -2,7 +2,7 @@ import React from "react";
 import { Check } from "lucide-react";
 import { loadStripe } from "@stripe/stripe-js";
 
-// Initialisation de Stripe avec ta clé publique
+// Initialize Stripe with public key
 const stripePromise = loadStripe("pk_live_51R1mHfG3UtTNBuRxHWDBd3y73w3NmrCyrclE4nyNzMuj9KCkAkX7GzdFnpAD2m7NJ6XMSY1TDajYohs07UKOVifw00ZbomCm91"); 
 
 interface Feature {
@@ -16,20 +16,19 @@ interface PricingPlan {
   price: string;
   period: string;
   description: string;
-  priceId: string; // Ajout de l'ID du prix Stripe
+  priceId: string;
   features: Feature[];
   cta: string;
   highlighted: boolean;
 }
 
-// Fonction pour appeler Stripe Checkout
+// Function to call Stripe Checkout
 const handleCheckout = async (priceId: string) => {
-  if (!priceId) return; // Évite les erreurs si le plan est gratuit ou personnalisé
+  if (!priceId) return;
 
   const stripe = await stripePromise;
-
- const response = await fetch("https://i40pilot.app/.netlify/functions/create-checkout-session", {
-
+  
+  const response = await fetch("https://i40pilot.app/.netlify/functions/create-checkout-session", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ priceId }),
@@ -42,41 +41,40 @@ const handleCheckout = async (priceId: string) => {
 };
 
 const PricingSection: React.FC = () => {
-  const plans: PricingPlan[] = [
+  const plans = [
     {
       name: "Free",
       subtitle: "Starter",
-      price: "$0",
+      price: "€0",
       period: "forever",
-      description: "Ideal for small businesses starting with OEE tracking",
-      priceId: "", // Gratuit, donc pas de paiement
+      description: "Perfect for small businesses starting with OEE tracking",
+      priceId: "", // Free plan, no payment needed
       features: [
         { text: "1 production line", icon: <Check className="h-4 w-4" /> },
-        { text: "30 entries per day", icon: <Check className="h-4 w-4" /> },
-        { text: "1 user", icon: <Check className="h-4 w-4" /> },
+        { text: "Up to 3 machines", icon: <Check className="h-4 w-4" /> },
         { text: "Basic OEE dashboard", icon: <Check className="h-4 w-4" /> },
         { text: "Excel import/export", icon: <Check className="h-4 w-4" /> },
+        { text: "Community support", icon: <Check className="h-4 w-4" /> },
       ],
       cta: "Start for free",
-      highlighted: false,
+      highlighted: false
     },
     {
       name: "Pro",
-      subtitle: "SaaS – Monthly subscription",
-      price: "$99",
-      period: "per month",
+      subtitle: "Per Machine",
+      price: "€39",
+      period: "per machine/month",
       description: "For businesses looking to optimize their production",
-      priceId: "price_1R1mtMG3UtTNBuRxjn3sSpoq", // Ton ID Stripe réel
+      priceId: "price_1R1mtMG3UtTNBuRxjn3sSpoq",
       features: [
         { text: "Unlimited production lines", icon: <Check className="h-4 w-4" /> },
-        { text: "Unlimited entries", icon: <Check className="h-4 w-4" /> },
-        { text: "Advanced user management", icon: <Check className="h-4 w-4" /> },
-        { text: "Machine connectivity (MQTT, SQL, REST API)", icon: <Check className="h-4 w-4" /> },
-        { text: "Advanced dashboard with detailed KPIs", icon: <Check className="h-4 w-4" /> },
-        { text: "Export to Excel, Power BI, ERP API", icon: <Check className="h-4 w-4" /> },
+        { text: "Pay per machine", icon: <Check className="h-4 w-4" /> },
+        { text: "Advanced analytics", icon: <Check className="h-4 w-4" /> },
+        { text: "Machine connectivity", icon: <Check className="h-4 w-4" /> },
+        { text: "Priority support", icon: <Check className="h-4 w-4" /> },
       ],
-      cta: "14-day free trial",
-      highlighted: true,
+      cta: "Start 14-day trial",
+      highlighted: true
     },
     {
       name: "Enterprise",
@@ -84,15 +82,15 @@ const PricingSection: React.FC = () => {
       price: "Custom",
       period: "contact us",
       description: "Complete solution for large industrial enterprises",
-      priceId: "", // Pas de paiement direct, nécessite contact
+      priceId: "", // Custom pricing, no direct payment
       features: [
         { text: "All Pro features", icon: <Check className="h-4 w-4" /> },
-        { text: "On-premise server installation", icon: <Check className="h-4 w-4" /> },
-        { text: "Advanced configuration and full data access", icon: <Check className="h-4 w-4" /> },
-        { text: "Dedicated support & custom integration", icon: <Check className="h-4 w-4" /> },
+        { text: "On-premise deployment", icon: <Check className="h-4 w-4" /> },
+        { text: "Custom integrations", icon: <Check className="h-4 w-4" /> },
+        { text: "Dedicated support", icon: <Check className="h-4 w-4" /> },
       ],
       cta: "Contact us",
-      highlighted: false,
+      highlighted: false
     }
   ];
 
@@ -133,7 +131,6 @@ const PricingSection: React.FC = () => {
                 </p>
                 <p className="mt-4 text-sm text-gray-500">{plan.description}</p>
 
-                {/* Bouton de paiement Stripe */}
                 {plan.priceId ? (
                   <button
                     onClick={() => handleCheckout(plan.priceId)}

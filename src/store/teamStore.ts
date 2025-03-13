@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { supabase } from '../lib/supabase';
+import { sendEmail } from '../services/emailService';
 import type { TeamMember, TeamRole, TeamExcelData } from '../types';
 
 interface ImportResult {
@@ -107,6 +108,19 @@ export const useTeamStore = create<TeamState>((set, get) => ({
       if (error) throw error;
 
       const newMember = data as TeamMember;
+
+      // Send invitation email
+      await sendEmail(
+        newMember.email,
+        'You\'ve been invited to join a team on Pilot',
+        'TEAM_INVITE',
+        {
+          projectName: projectId,
+          role: newMember.role,
+          inviteUrl: `https://i40pilot.app/invite/${newMember.id}`
+        }
+      );
+
       set((state) => ({
         members: [...state.members, newMember],
         loading: false
@@ -171,7 +185,7 @@ export const useTeamStore = create<TeamState>((set, get) => ({
       set({ loading: true, error: null });
       console.log("🚀 Starting bulk team member creation...");
 
-      // 1. Récupérer toutes les machines pour ce projet
+      // Get all machines for this project
       const { data: machines, error: machinesError } = await supabase
         .from('machines')
         .select('id, name')
@@ -183,7 +197,7 @@ export const useTeamStore = create<TeamState>((set, get) => ({
         throw new Error('No machines found for this project');
       }
 
-      // 2. Récupérer tous les membres existants
+      // Get all existing members
       const { data: existingMembers, error: membersError } = await supabase
         .from('team_members')
         .select('*')
@@ -191,13 +205,13 @@ export const useTeamStore = create<TeamState>((set, get) => ({
 
       if (membersError) throw membersError;
 
-      // 3. Créer les maps pour la recherche rapide
+      // Create maps for quick lookup
       const machinesByName = new Map(machines.map(machine => [machine.name.toLowerCase(), machine]));
       const existingMembersByEmail = new Map(
         existingMembers?.map(member => [member.email.toLowerCase(), member]) || []
       );
 
-      // 4. Préparer les résultats
+      // Prepare results
       const duplicates: Array<{
         email: string;
         existing: TeamMember;
@@ -205,7 +219,7 @@ export const useTeamStore = create<TeamState>((set, get) => ({
       }> = [];
       const created: TeamMember[] = [];
 
-      // 5. Traiter chaque membre
+      // Process each member
       for (const member of members) {
         const machine = machinesByName.get(member.machine_name.toLowerCase());
         
@@ -248,7 +262,7 @@ export const useTeamStore = create<TeamState>((set, get) => ({
         }
       }
 
-      // 6. Mettre à jour l'état local
+      // Update local state
       if (created.length > 0) {
         set((state) => ({
           members: [...state.members, ...created],
@@ -307,6 +321,20 @@ export const useTeamStore = create<TeamState>((set, get) => ({
       }));
 
       await get().bulkUpdateMembers(updates);
+
+      // Send invitation emails
+      for (const member of members) {
+        await sendEmail(
+          member.email,
+          'You\'ve been invited to join a team on Pilot',
+          'TEAM_INVITE',
+          {
+            projectName: member.project_id,
+            role: member.role,
+            inviteUrl: `https://i40pilot.app/invite/${member.id}`
+          }
+        );
+      }
 
     } catch (error) {
       console.error('Error inviting team members:', error);

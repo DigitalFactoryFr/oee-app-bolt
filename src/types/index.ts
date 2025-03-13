@@ -197,6 +197,13 @@ export interface TeamExcelData {
   working_time_minutes: number;
 }
 
+export type EmailTemplate = 
+  | 'WELCOME'
+  | 'TEAM_INVITE'
+  | 'SUBSCRIPTION_STARTED'
+  | 'MACHINE_LIMIT_WARNING'
+  | 'PAYMENT_FAILED';
+
 export const FAILURE_TYPES = [
   { code: 'AP', name: 'Planned downtime' },
   { code: 'PA', name: 'Equipment breakdown' },

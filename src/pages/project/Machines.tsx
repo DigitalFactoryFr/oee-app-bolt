@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useForm } from 'react-hook-form';
 import { Upload, Check, AlertCircle, Download, Plus, Trash2, Edit2 } from 'lucide-react';
@@ -6,9 +6,12 @@ import ProjectLayout from '../../components/layout/ProjectLayout';
 import { useMachineStore } from '../../store/machineStore';
 import { useProductionLineStore } from '../../store/productionLineStore';
 import { useOnboardingStore } from '../../store/onboardingStore';
+import { useSubscriptionStore } from '../../store/subscriptionStore';
 import { parseMachinesExcel, generateMachinesTemplate } from '../../utils/excelParser';
 import MachineFormDialog from '../../components/machines/MachineFormDialog';
 import MachineImportPreview from '../../components/machines/MachineImportPreview';
+import SubscriptionBanner from '../../components/SubscriptionBanner';
+import UpgradePrompt from '../../components/UpgradePrompt';
 import type { Machine } from '../../types';
 
 interface MachineFormData {
@@ -21,9 +24,10 @@ interface MachineFormData {
 const MachinesPage: React.FC = () => {
   const { projectId } = useParams<{ projectId: string }>();
   const navigate = useNavigate();
-  const { machines, loading: machinesLoading, error, fetchMachines, createMachine, updateMachine, deleteMachine, bulkCreateMachines, bulkUpdateMachines } = useMachineStore();
+  const { machines, loading: machinesLoading, error: machinesError, fetchMachines, createMachine, updateMachine, deleteMachine, bulkCreateMachines, bulkUpdateMachines } = useMachineStore();
   const { lines, loading: linesLoading, fetchLines } = useProductionLineStore();
   const { updateStepStatus } = useOnboardingStore();
+  const { subscription, fetchSubscription } = useSubscriptionStore();
   
   const [isExcelMode, setIsExcelMode] = useState(false);
   const [excelError, setExcelError] = useState<string | null>(null);
@@ -39,6 +43,7 @@ const MachinesPage: React.FC = () => {
     created: Machine[];
   } | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [formError, setFormError] = useState<string | null>(null);
 
   const {
     register,
@@ -55,8 +60,9 @@ const MachinesPage: React.FC = () => {
     if (projectId) {
       fetchMachines(projectId);
       fetchLines(projectId);
+      fetchSubscription(projectId);
     }
-  }, [projectId, fetchMachines, fetchLines]);
+  }, [projectId, fetchMachines, fetchLines, fetchSubscription]);
 
   useEffect(() => {
     if (editingMachine) {
@@ -76,9 +82,14 @@ const MachinesPage: React.FC = () => {
   }, [editingMachine, setValue, reset]);
 
   const onSubmit = async (data: MachineFormData) => {
-    if (!projectId) return;
+    if (!projectId || !subscription) return;
 
     try {
+      // Check machine limit for free tier
+      if (subscription.status === 'free' && machines.length >= subscription.machine_limit && !editingMachine) {
+        throw new Error(`Free tier is limited to ${subscription.machine_limit} machines. Please upgrade to add more machines.`);
+      }
+
       if (editingMachine) {
         await updateMachine(editingMachine.id, data);
         setEditingMachine(null);
@@ -97,6 +108,7 @@ const MachinesPage: React.FC = () => {
       }, 5000);
     } catch (err) {
       console.error('Error saving machine:', err);
+      setFormError(err instanceof Error ? err.message : 'Failed to save machine');
     }
   };
 
@@ -112,58 +124,6 @@ const MachinesPage: React.FC = () => {
       } catch (error) {
         setExcelError((error as Error).message);
       }
-    }
-  };
-
-  const handleImportConfirm = async () => {
-    if (!importPreview || !projectId) return;
-
-    try {
-      // Create new machines only
-      if (importPreview.created.length > 0) {
-        await bulkCreateMachines(projectId, importPreview.created);
-      }
-      
-      await fetchMachines(projectId);
-      setImportPreview(null);
-      setSuccessMessage('Machines have been successfully imported!');
-      
-      setTimeout(() => {
-        setSuccessMessage(null);
-      }, 5000);
-      
-    } catch (error) {
-      setExcelError((error as Error).message);
-    }
-  };
-
-  const handleImportUpdateAll = async () => {
-    if (!importPreview || !projectId) return;
-
-    try {
-      // Update existing machines
-      const updates = importPreview.duplicates.map(duplicate => ({
-        id: duplicate.existing.id,
-        ...duplicate.new
-      }));
-      
-      await bulkUpdateMachines(updates);
-      
-      // Create new machines
-      if (importPreview.created.length > 0) {
-        await bulkCreateMachines(projectId, importPreview.created);
-      }
-      
-      await fetchMachines(projectId);
-      setImportPreview(null);
-      setSuccessMessage('All machines have been successfully updated and imported!');
-      
-      setTimeout(() => {
-        setSuccessMessage(null);
-      }, 5000);
-      
-    } catch (error) {
-      setExcelError((error as Error).message);
     }
   };
 
@@ -186,6 +146,28 @@ const MachinesPage: React.FC = () => {
       console.error('Error generating template:', error);
     }
   };
+  
+const handleImportConfirm = async () => {
+    if (!importPreview || !projectId) return;
+
+    try {
+      // Create new machines only
+      if (importPreview.created.length > 0) {
+        await bulkCreateMachines(projectId, importPreview.created);
+      }
+      
+      await fetchMachines(projectId);
+      setImportPreview(null);
+      setSuccessMessage('Machines have been successfully imported!');
+      
+      setTimeout(() => {
+        setSuccessMessage(null);
+      }, 5000);
+      
+    } catch (error) {
+      setExcelError((error as Error).message);
+    }
+  };
 
   const handleDelete = (id: string) => {
     setShowDeleteConfirm(id);
@@ -195,11 +177,6 @@ const MachinesPage: React.FC = () => {
     await deleteMachine(id);
     setShowDeleteConfirm(null);
     await fetchMachines(projectId);
-    setSuccessMessage('Machine has been successfully deleted!');
-    
-    setTimeout(() => {
-      setSuccessMessage(null);
-    }, 5000);
   };
 
   const handleEdit = (machine: Machine) => {
@@ -224,8 +201,8 @@ const MachinesPage: React.FC = () => {
     }
   };
 
-  const getLineById = (lineId: string) => {
-    return lines.find(line => line.id === lineId);
+  const getMachineById = (machineId: string) => {
+    return machines.find(machine => machine.id === machineId);
   };
 
   const getMachinesForLine = (lineId: string): Machine[] => {
@@ -237,12 +214,33 @@ const MachinesPage: React.FC = () => {
   return (
     <ProjectLayout>
       <div className="py-8 px-4 sm:px-6 lg:px-8">
-        <div className="mb-6">
-          <h2 className="text-2xl font-bold text-gray-900">Machines</h2>
-          <p className="mt-1 text-sm text-gray-500">
-            Configure your machines and assign them to production lines.
-          </p>
+        <div className="flex items-center justify-between mb-6">
+          <div>
+            <h2 className="text-2xl font-bold text-gray-900">Machines</h2>
+            <p className="mt-1 text-sm text-gray-500">
+              Configure your machines and assign them to production lines.
+            </p>
+          </div>
+          {subscription?.status === 'free' && machines.length >= subscription.machine_limit && (
+            <button
+              onClick={() => startCheckout(machines.length + 1)}
+              className="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700"
+            >
+              Upgrade to Add More Machines
+            </button>
+          )}
         </div>
+
+        {subscription?.status === 'free' && (
+          <div className="mb-6 grid grid-cols-1 lg:grid-cols-4 gap-6">
+            <div className="lg:col-span-3">
+              <SubscriptionBanner machineCount={machines.length} />
+            </div>
+            <div className="lg:col-span-1">
+              <UpgradePrompt machineCount={machines.length + 1} />
+            </div>
+          </div>
+        )}
 
         {successMessage && (
           <div className="mb-4 bg-green-50 p-4 rounded-md flex items-start">
@@ -258,10 +256,10 @@ const MachinesPage: React.FC = () => {
           <div className="flex justify-center items-center h-64">
             <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-700"></div>
           </div>
-        ) : error ? (
+        ) : machinesError ? (
           <div className="bg-red-50 p-4 rounded-md">
             <h3 className="text-sm font-medium text-red-800">Error loading machines</h3>
-            <div className="mt-2 text-sm text-red-700">{error}</div>
+            <div className="mt-2 text-sm text-red-700">{machinesError}</div>
           </div>
         ) : (
           <div className="space-y-6">

@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { supabase } from '../lib/supabase';
+import { sendEmail } from '../services/emailService';
 import type { User } from '../types';
 
 interface AuthState {
@@ -10,6 +11,7 @@ interface AuthState {
   signUp: (email: string, password: string) => Promise<void>;
   signOut: () => Promise<void>;
   getUser: () => Promise<void>;
+  signInWithGoogle: () => Promise<void>;
 }
 
 export const useAuthStore = create<AuthState>((set) => ({
@@ -52,6 +54,9 @@ export const useAuthStore = create<AuthState>((set) => ({
       if (error) throw error;
       
       if (data.user) {
+        // Send welcome email
+        await sendEmail(email, 'Welcome to Pilot!', 'WELCOME', { email });
+        
         set({ 
           user: {
             id: data.user.id,
@@ -100,4 +105,22 @@ export const useAuthStore = create<AuthState>((set) => ({
       set({ user: null, loading: false });
     }
   },
+
+  signInWithGoogle: async () => {
+    try {
+      set({ loading: true, error: null });
+
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: {
+          redirectTo: 'https://i40pilot.app/auth/callback'
+        }
+      });
+
+      if (error) throw error;
+
+    } catch (error) {
+      set({ error: (error as Error).message, loading: false });
+    }
+  }
 }));

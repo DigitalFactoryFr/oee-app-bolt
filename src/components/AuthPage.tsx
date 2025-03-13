@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { useSearchParams, useNavigate, useLocation } from 'react-router-dom';
-import { Activity, Mail, Lock, Eye, EyeOff, Linkedin, ArrowLeft } from 'lucide-react';
+import { Activity, Mail, Lock, Eye, EyeOff } from 'lucide-react';
 import { useAuthStore } from '../store/authStore';
 import { useProjectStore } from '../store/projectStore';
+import SocialAuth from './SocialAuth';
 
 const AuthPage: React.FC = () => {
   const [searchParams] = useSearchParams();
@@ -20,32 +21,25 @@ const AuthPage: React.FC = () => {
   const [error, setError] = useState('');
   
   useEffect(() => {
-    // Reset form and errors when mode changes
     setEmail('');
     setPassword('');
     setConfirmPassword('');
     setError('');
   }, [mode]);
   
- useEffect(() => {
-  console.log("User:", user);
-  console.log("Projects:", projects);
-
-  if (user) {
-    if (projects.length === 0) {
-      console.log("No projects → Redirecting to /projects/new");
-      navigate('/projects/new', { 
-        state: { isFirstProject: true },
-        replace: true 
-      });
-    } else {
-      const from = projects.length > 0 ? "/dashboard" : "/projects/new";
-      console.log("Has projects → Redirecting to", from);
-      navigate(from, { replace: true });
+  useEffect(() => {
+    if (user) {
+      if (projects.length === 0) {
+        navigate('/projects/new', { 
+          state: { isFirstProject: true },
+          replace: true 
+        });
+      } else {
+        const from = projects.length > 0 ? "/dashboard" : "/projects/new";
+        navigate(from, { replace: true });
+      }
     }
-  }
-}, [user, projects, navigate, location]);
-
+  }, [user, projects, navigate, location]);
   
   useEffect(() => {
     if (authError) {
@@ -55,7 +49,7 @@ const AuthPage: React.FC = () => {
       } else if (authError.includes('Email not confirmed')) {
         userMessage = 'Please confirm your email address before logging in';
       } else if (authError.includes('User already registered')) {
-        userMessage = 'An account with this email already exists';
+        userMessage = 'An account with this email already exists. Please log in instead.';
       }
       setError(userMessage);
     }
@@ -88,13 +82,7 @@ const AuthPage: React.FC = () => {
           return;
         }
       
-        // 🔥 Appel à signUp ici
-        const { error } = await signUp(email, password);
-        
-        if (!error) {
-          // ✅ Envoi de l'email après une inscription réussie
-          await sendEmail(email); 
-        }
+        await signUp(email, password);
       } else {
         await signIn(email, password);
       }
@@ -105,43 +93,35 @@ const AuthPage: React.FC = () => {
     }
   };
 
-const API_URL = process.env.NODE_ENV === 'production'
-  ? 'https://oee-app-bolt.onrender.com/send-email'
-  : 'http://localhost:5000/send-email';
+  const API_URL = process.env.NODE_ENV === 'production'
+    ? 'https://oee-app-bolt.onrender.com/send-email'
+    : 'http://localhost:5000/send-email';
 
-const sendEmail = async (email: string) => {
-  try {
-    const response = await fetch(API_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        to: email,
-        subject: 'Welcome to Pilot!',
-        html: `<p>Welcome! You are now authenticated on our platform.</p>`,
-      }),
-    });
+  const sendEmail = async (email: string) => {
+    try {
+      const response = await fetch(API_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          to: email,
+          subject: 'Welcome to Pilot!',
+          html: `<p>Welcome! You are now authenticated on our platform.</p>`,
+        }),
+      });
 
-    if (!response.ok) {
-      throw new Error(`Erreur API ${response.status}: ${await response.text()}`);
+      if (!response.ok) {
+        throw new Error(`API Error ${response.status}: ${await response.text()}`);
+      }
+
+      console.log("✅ Confirmation email sent!");
+    } catch (error) {
+      console.error("❌ Error sending email:", error);
     }
-
-    console.log("✅ Email de confirmation envoyé !");
-  } catch (error) {
-    console.error("❌ Erreur lors de l'envoi de l'email :", error);
-  }
-};
-
+  };
   
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col justify-center py-12 sm:px-6 lg:px-8">
       <div className="sm:mx-auto sm:w-full sm:max-w-md">
-        <button 
-          onClick={() => navigate('/')}
-          className="flex items-center text-blue-600 hover:text-blue-800 mb-6 mx-auto"
-        >
-          <ArrowLeft className="h-4 w-4 mr-1" />
-          Back to home
-        </button>
         <div className="flex items-center justify-center">
           <Activity className="h-8 w-8 text-blue-600" />
           <span className="ml-2 text-xl font-bold text-gray-900">Pilot</span>
@@ -277,40 +257,7 @@ const sendEmail = async (email: string) => {
             </div>
           </form>
 
-          <div className="mt-6">
-            <div className="relative">
-              <div className="absolute inset-0 flex items-center">
-                <div className="w-full border-t border-gray-300" />
-              </div>
-              <div className="relative flex justify-center text-sm">
-                <span className="px-2 bg-white text-gray-500">Or continue with</span>
-              </div>
-            </div>
-
-            <div className="mt-6 grid grid-cols-2 gap-3">
-              <div>
-                <button
-                  onClick={() => {}}
-                  className="w-full inline-flex justify-center py-2 px-4 border border-gray-300 rounded-md shadow-sm bg-white text-sm font-medium text-gray-500 hover:bg-gray-50"
-                >
-                  <span className="sr-only">Sign in with Google</span>
-                  <svg className="h-5 w-5" aria-hidden="true" fill="currentColor" viewBox="0 0 24 24">
-                    <path d="M12.48 10.92v3.28h7.84c-.24 1.84-.853 3.187-1.787 4.133-1.147 1.147-2.933 2.4-6.053 2.4-4.827 0-8.6-3.893-8.6-8.72s3.773-8.72 8.6-8.72c2.6 0 4.507 1.027 5.907 2.347l2.307-2.307C18.747 1.44 16.133 0 12.48 0 5.867 0 .307 5.387.307 12s5.56 12 12.173 12c3.573 0 6.267-1.173 8.373-3.36 2.16-2.16 2.84-5.213 2.84-7.667 0-.76-.053-1.467-.173-2.053H12.48z" />
-                  </svg>
-                </button>
-              </div>
-
-              <div>
-                <button
-                  onClick={() => {}}
-                  className="w-full inline-flex justify-center py-2 px-4 border border-gray-300 rounded-md shadow-sm bg-white text-sm font-medium text-gray-500 hover:bg-gray-50"
-                >
-                  <span className="sr-only">Sign in with LinkedIn</span>
-                  <Linkedin className="h-5 w-5 text-blue-700" />
-                </button>
-              </div>
-            </div>
-          </div>
+          <SocialAuth />
         </div>
       </div>
     </div>

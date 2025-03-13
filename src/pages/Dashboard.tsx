@@ -23,7 +23,9 @@ import { useOnboardingStore } from '../store/onboardingStore';
 import { useMachineStore } from '../store/machineStore';
 import { useProductStore } from '../store/productStore';
 import { useTeamStore } from '../store/teamStore';
+import { useSubscriptionStore } from '../store/subscriptionStore';
 import { supabase } from '../lib/supabase';
+import UpgradePrompt from '../components/UpgradePrompt';
 
 interface RecentEvent {
   id: string;
@@ -50,6 +52,7 @@ const Dashboard: React.FC = () => {
   const { machines, fetchMachines } = useMachineStore();
   const { products, fetchProducts } = useProductStore();
   const { members, fetchMembers } = useTeamStore();
+  const { subscription, fetchSubscription } = useSubscriptionStore();
   const [showProjectSelector, setShowProjectSelector] = useState(false);
   const [recentEvents, setRecentEvents] = useState<RecentEvent[]>([]);
   const [recommendations, setRecommendations] = useState<Recommendation[]>([]);
@@ -66,6 +69,7 @@ const Dashboard: React.FC = () => {
           fetchMachines(currentProject.id),
           fetchProducts(currentProject.id),
           fetchMembers(currentProject.id),
+          fetchSubscription(currentProject.id),
           loadRecentEvents(),
           generateRecommendations()
         ]);
@@ -300,6 +304,12 @@ const Dashboard: React.FC = () => {
   return (
     <DashboardLayout>
       <div className="py-6 px-4 sm:px-6 lg:px-8">
+        {subscription?.status === 'free' && (
+          <div className="mb-6">
+            <UpgradePrompt machineCount={machines.length + 1} />
+          </div>
+        )}
+        
         {/* Project Overview */}
         <div className="bg-white rounded-lg shadow-sm p-6 mb-6">
           <h2 className="text-lg font-medium text-gray-900 mb-6">Project Overview</h2>
