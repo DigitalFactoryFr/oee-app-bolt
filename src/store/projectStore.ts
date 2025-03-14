@@ -38,25 +38,20 @@ export const useProjectStore = create<ProjectState>((set) => ({
   
   fetchProjects: async () => {
     try {
-      console.log("🔍 Fetching projects...");
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) {
-        console.log("❌ No user found, clearing projects");
         set({ projects: [], loading: false });
         return;
       }
 
       set({ loading: true, error: null });
 
-      // Get all projects in a single query
       const { data, error } = await supabase
         .from('projects')
         .select('*')
         .order('created_at', { ascending: false });
 
       if (error) throw error;
-
-      console.log("✅ Projects fetched successfully:", data?.length || 0, "projects");
       set({ projects: data || [], loading: false });
     } catch (error) {
       console.error('Error fetching projects:', error);
@@ -66,7 +61,6 @@ export const useProjectStore = create<ProjectState>((set) => ({
   
   fetchProject: async (id) => {
     try {
-      console.log("🔍 Fetching project:", id);
       set({ loading: true, error: null });
       const { data, error } = await supabase
         .from('projects')
@@ -75,12 +69,7 @@ export const useProjectStore = create<ProjectState>((set) => ({
         .single();
       
       if (error) throw error;
-      
-      console.log("✅ Project fetched successfully:", data?.name);
-      set({ 
-        currentProject: data as Project,
-        loading: false
-      });
+      set({ currentProject: data as Project, loading: false });
     } catch (error) {
       console.error('Error fetching project:', error);
       set({ error: (error as Error).message, loading: false });
@@ -89,38 +78,37 @@ export const useProjectStore = create<ProjectState>((set) => ({
   
   createProject: async (name, description = '') => {
     try {
-      console.log("🚀 Creating new project:", { name, description });
       set({ loading: true, error: null });
       
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) {
         throw new Error('User not authenticated');
       }
-      
-      // First create the project
+
+      // Create project
       const { data: project, error: projectError } = await supabase
         .from('projects')
-        .insert([{
+        .insert({
           name,
           description,
           user_id: user.id
-        }])
+        })
         .select()
         .single();
       
       if (projectError) throw projectError;
-      
-      // Then create the owner team member record
+
+      // Create owner team member
       const { error: teamError } = await supabase
         .from('team_members')
-        .insert([{
+        .insert({
           project_id: project.id,
           email: user.email,
           role: 'owner',
           status: 'active',
           team_name: 'Owners',
           working_time_minutes: 480
-        }]);
+        });
       
       if (teamError) throw teamError;
       

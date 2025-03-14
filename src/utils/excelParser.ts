@@ -232,10 +232,6 @@ export const parseMachinesExcel = async (file: File): Promise<MachineExcelData[]
   });
 };
 
-
-
-
-
 export const generateExcelTemplate = () => {
   const template = [
     {
@@ -384,7 +380,6 @@ export const parseProductsExcel = async (file: File): Promise<ProductExcelData[]
 };
 
 export const generateProductsTemplate = () => {
-  // Updated template to match the provided data structure
   const template = [
     {
       name: 'Product A',
@@ -436,7 +431,7 @@ export const parseTeamExcel = async (file: File): Promise<TeamExcelData[]> => {
 
         const worksheet = workbook.Sheets[workbook.SheetNames[0]];
         const jsonData = XLSX.utils.sheet_to_json(worksheet, {
-          header: ['email', 'role', 'team_name', 'machine_name', 'working_time_minutes'],
+          header: ['email', 'role', 'team_name', 'line_name', 'machine_name', 'working_time_minutes'],
           range: 1
         });
 
@@ -447,13 +442,8 @@ export const parseTeamExcel = async (file: File): Promise<TeamExcelData[]> => {
         }
 
         const members: TeamExcelData[] = jsonData.map((row: any, index) => {
-          if (!row.email || !row.role || !row.team_name || !row.machine_name || !row.working_time_minutes) {
-            throw new Error(`Row ${index + 2}: All fields are required`);
-          }
-
-          const workingTime = Number(row.working_time_minutes);
-          if (isNaN(workingTime) || workingTime <= 0 || workingTime > 1440) {
-            throw new Error(`Row ${index + 2}: Invalid working time value (must be between 1 and 1440)`);
+          if (!row.email || !row.role || !row.team_name || !row.working_time_minutes) {
+            throw new Error(`Row ${index + 2}: All fields except line_name and machine_name are required`);
           }
 
           const email = String(row.email).trim().toLowerCase();
@@ -462,15 +452,32 @@ export const parseTeamExcel = async (file: File): Promise<TeamExcelData[]> => {
           }
 
           const role = String(row.role).trim().toLowerCase();
-          if (!['operator', 'line_manager', 'it_admin', 'super_admin'].includes(role)) {
-            throw new Error(`Row ${index + 2}: Invalid role (must be one of: operator, line_manager, it_admin, super_admin)`);
+          if (!['owner', 'team_manager', 'operator', 'quality_technician', 'maintenance_technician'].includes(role)) {
+            throw new Error(`Row ${index + 2}: Invalid role (must be one of: owner, team_manager, operator, quality_technician, maintenance_technician)`);
+          }
+
+          // Validate role-specific fields
+          if (role === 'operator' && !row.machine_name) {
+            throw new Error(`Row ${index + 2}: Machine name is required for operators`);
+          }
+          if (role === 'team_manager' && !row.line_name) {
+            throw new Error(`Row ${index + 2}: Line name is required for team managers`);
+          }
+          if (['owner', 'quality_technician', 'maintenance_technician'].includes(role) && (row.machine_name || row.line_name)) {
+            throw new Error(`Row ${index + 2}: ${role} cannot be assigned to a machine or line`);
+          }
+
+          const workingTime = Number(row.working_time_minutes);
+          if (isNaN(workingTime) || workingTime <= 0 || workingTime > 1440) {
+            throw new Error(`Row ${index + 2}: Invalid working time value (must be between 1 and 1440 minutes)`);
           }
 
           return {
             email,
             role,
             team_name: String(row.team_name).trim(),
-            machine_name: String(row.machine_name).trim(),
+            line_name: row.line_name ? String(row.line_name).trim() : undefined,
+            machine_name: row.machine_name ? String(row.machine_name).trim() : undefined,
             working_time_minutes: workingTime
           };
         });
@@ -493,34 +500,37 @@ export const parseTeamExcel = async (file: File): Promise<TeamExcelData[]> => {
 };
 
 export const generateTeamTemplate = () => {
-  // Updated template to match the provided data structure
   const template = [
     {
       email: 'operator1@example.com',
       role: 'operator',
       team_name: 'Team A',
       machine_name: 'Machine 1',
+      line_name: '',
       working_time_minutes: 480
     },
     {
-      email: 'operator2@example.com',
-      role: 'operator', 
+      email: 'manager1@example.com',
+      role: 'team_manager',
       team_name: 'Team B',
-      machine_name: 'Machine 2',
+      machine_name: '',
+      line_name: 'Line 1',
       working_time_minutes: 480
     },
     {
-      email: 'operator1@example.com',
-      role: 'operator',
-      team_name: 'Team A',
-      machine_name: 'Machine 3',
+      email: 'quality1@example.com',
+      role: 'quality_technician',
+      team_name: 'Quality Team',
+      machine_name: '',
+      line_name: '',
       working_time_minutes: 480
     },
     {
-      email: 'operator2@example.com',
-      role: 'operator',
-      team_name: 'Team B',
-      machine_name: 'Machine 1',
+      email: 'maintenance1@example.com',
+      role: 'maintenance_technician',
+      team_name: 'Maintenance Team',
+      machine_name: '',
+      line_name: '',
       working_time_minutes: 480
     }
   ];
@@ -529,8 +539,28 @@ export const generateTeamTemplate = () => {
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'Team Members');
 
-  const buffer = XLSX.write(wb, { type: 'array', bookType: 'xlsx' });
-  return buffer;
+  // Add instructions sheet
+  const instructions = [
+    ['Field', 'Required', 'Description', 'Valid Values'],
+    ['email', 'Yes', 'Team member email address', 'Valid email format'],
+    ['role', 'Yes', 'Team member role', 'owner, team_manager, operator, quality_technician, maintenance_technician'],
+    ['team_name', 'Yes', 'Name of the team', 'Any text'],
+    ['machine_name', 'For operators', 'Machine name (required for operators)', 'Must match existing machine name'],
+    ['line_name', 'For managers', 'Production line name (required for team managers)', 'Must match existing line name'],
+    ['working_time_minutes', 'Yes', 'Daily working time in minutes', '1-1440'],
+    ['', '', '', ''],
+    ['Role-specific Requirements:', '', '', ''],
+    ['operator', '', 'Requires machine_name, cannot have line_name', ''],
+    ['team_manager', '', 'Requires line_name, cannot have machine_name', ''],
+    ['owner', '', 'No machine or line assignment allowed', ''],
+    ['quality_technician', '', 'No machine or line assignment allowed', ''],
+    ['maintenance_technician', '', 'No machine or line assignment allowed', '']
+  ];
+
+  const infoWs = XLSX.utils.aoa_to_sheet(instructions);
+  XLSX.utils.book_append_sheet(wb, infoWs, 'Instructions');
+
+  return XLSX.write(wb, { type: 'array', bookType: 'xlsx' });
 };
 
 export const parseDataExcel = async (file: File): Promise<ExcelImportResult> => {

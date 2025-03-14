@@ -1,5 +1,5 @@
-import React from 'react';
-import { ArrowRight } from 'lucide-react';
+import React from "react";
+import { ArrowRight } from "lucide-react";
 import { useSubscriptionStore } from '../store/subscriptionStore';
 import { loadStripe } from '@stripe/stripe-js';
 

@@ -14,9 +14,9 @@ export interface Project {
 }
 
 export type ProjectRole = 
-  | 'owner'      // Full project access and management
-  | 'team_manager'    // Can manage team and production
-  | 'operator'   // Basic data entry
+  | 'owner'                  // Full project access and management
+  | 'team_manager'           // Can manage team and production lines
+  | 'operator'              // Basic data entry
   | 'quality_technician'    // Quality control access
   | 'maintenance_technician'; // Maintenance access
 

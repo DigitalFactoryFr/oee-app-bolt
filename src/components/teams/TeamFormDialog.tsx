@@ -78,7 +78,7 @@ const TeamFormDialog: React.FC<TeamFormDialogProps> = ({
                       <option value="">Select a role</option>
                       {roles.map((role) => (
                         <option key={role.id} value={role.id}>
-                          {role.name}
+                          {role.name} ({role.scope})
                         </option>
                       ))}
                     </select>

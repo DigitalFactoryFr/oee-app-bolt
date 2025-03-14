@@ -6,8 +6,9 @@ interface TeamImportPreviewProps {
   errors: Array<{ row: number; message: string }>;
   members: TeamMember[];
   onClose: () => void;
-  getMachineName: (machineId: string) => string;
-  getRoleName: (roleId: string) => string;
+  getMachineName: (machineId?: string) => string | undefined;
+  getLineName: (lineId?: string) => string | undefined;
+  getRoleName: (roleId: string) => string | undefined;
 }
 
 const TeamImportPreview: React.FC<TeamImportPreviewProps> = ({
@@ -15,6 +16,7 @@ const TeamImportPreview: React.FC<TeamImportPreviewProps> = ({
   members,
   onClose,
   getMachineName,
+  getLineName,
   getRoleName
 }) => {
   return (
@@ -23,7 +25,7 @@ const TeamImportPreview: React.FC<TeamImportPreviewProps> = ({
         <div className="fixed inset-0 transition-opacity" aria-hidden="true">
           <div className="absolute inset-0 bg-gray-500 opacity-75"></div>
         </div>
-        <span className="hidden sm:inline-block sm:align-middle sm:h-screen" aria-hidden=" true">&#8203;</span>
+        <span className="hidden sm:inline-block sm:align-middle sm:h-screen" aria-hidden="true">&#8203;</span>
         <div className="inline-block align-bottom bg-white rounded-lg px-4 pt-5 pb-4 text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-4xl sm:w-full sm:p-6">
           <div>
             <div className="mt-3 text-center sm:mt-5">
@@ -69,7 +71,7 @@ const TeamImportPreview: React.FC<TeamImportPreviewProps> = ({
                             Team
                           </th>
                           <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                            Machine
+                            Assignment
                           </th>
                           <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                             Working Time
@@ -92,7 +94,9 @@ const TeamImportPreview: React.FC<TeamImportPreviewProps> = ({
                               {member.team_name}
                             </td>
                             <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                              {getMachineName(member.machine_id)}
+                              {member.machine_id ? `Machine: ${getMachineName(member.machine_id)}` : 
+                               member.line_id ? `Line: ${getLineName(member.line_id)}` : 
+                               'Project Level'}
                             </td>
                             <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                               {member.working_time_minutes} min

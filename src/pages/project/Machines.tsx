@@ -5,13 +5,11 @@ import { Upload, Check, AlertCircle, Download, Plus, Trash2, Edit2 } from 'lucid
 import ProjectLayout from '../../components/layout/ProjectLayout';
 import { useMachineStore } from '../../store/machineStore';
 import { useProductionLineStore } from '../../store/productionLineStore';
-import { useOnboardingStore } from '../../store/onboardingStore';
 import { useSubscriptionStore } from '../../store/subscriptionStore';
 import { parseMachinesExcel, generateMachinesTemplate } from '../../utils/excelParser';
 import MachineFormDialog from '../../components/machines/MachineFormDialog';
 import MachineImportPreview from '../../components/machines/MachineImportPreview';
 import SubscriptionBanner from '../../components/SubscriptionBanner';
-import UpgradePrompt from '../../components/UpgradePrompt';
 import type { Machine } from '../../types';
 
 interface MachineFormData {
@@ -26,7 +24,6 @@ const MachinesPage: React.FC = () => {
   const navigate = useNavigate();
   const { machines, loading: machinesLoading, error: machinesError, fetchMachines, createMachine, updateMachine, deleteMachine, bulkCreateMachines, bulkUpdateMachines } = useMachineStore();
   const { lines, loading: linesLoading, fetchLines } = useProductionLineStore();
-  const { updateStepStatus } = useOnboardingStore();
   const { subscription, fetchSubscription } = useSubscriptionStore();
   
   const [isExcelMode, setIsExcelMode] = useState(false);
@@ -62,7 +59,7 @@ const MachinesPage: React.FC = () => {
       fetchLines(projectId);
       fetchSubscription(projectId);
     }
-  }, [projectId, fetchMachines, fetchLines, fetchSubscription]);
+  }, [projectId]);
 
   useEffect(() => {
     if (editingMachine) {
@@ -146,8 +143,8 @@ const MachinesPage: React.FC = () => {
       console.error('Error generating template:', error);
     }
   };
-  
-const handleImportConfirm = async () => {
+
+  const handleImportConfirm = async () => {
     if (!importPreview || !projectId) return;
 
     try {
@@ -194,13 +191,6 @@ const handleImportConfirm = async () => {
     reset();
   };
 
-  const handleContinueToProducts = () => {
-    if (projectId) {
-      updateStepStatus('machines', 'completed');
-      navigate(`/projects/${projectId}/onboarding/products`);
-    }
-  };
-
   const getMachineById = (machineId: string) => {
     return machines.find(machine => machine.id === machineId);
   };
@@ -223,7 +213,7 @@ const handleImportConfirm = async () => {
           </div>
           {subscription?.status === 'free' && machines.length >= subscription.machine_limit && (
             <button
-              onClick={() => startCheckout(machines.length + 1)}
+              onClick={() => navigate('/pricing')}
               className="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700"
             >
               Upgrade to Add More Machines
@@ -232,13 +222,8 @@ const handleImportConfirm = async () => {
         </div>
 
         {subscription?.status === 'free' && (
-          <div className="mb-6 grid grid-cols-1 lg:grid-cols-4 gap-6">
-            <div className="lg:col-span-3">
-              <SubscriptionBanner machineCount={machines.length} />
-            </div>
-            <div className="lg:col-span-1">
-              <UpgradePrompt machineCount={machines.length + 1} />
-            </div>
+          <div className="mb-6">
+            <SubscriptionBanner machineCount={machines.length} />
           </div>
         )}
 
@@ -411,28 +396,6 @@ const handleImportConfirm = async () => {
                   </div>
                 )}
               </div>
-
-              {machines.length > 0 && (
-                <div className="p-6 bg-gray-50">
-                  <div className="flex justify-end space-x-3">
-                    <button
-                      type="button"
-                      onClick={() => navigate('/dashboard')}
-                      className="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      type="button"
-                      onClick={handleContinueToProducts}
-                      className="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
-                    >
-                      <Check className="h-4 w-4 mr-2" />
-                      Continue to Products
-                    </button>
-                  </div>
-                </div>
-              )}
             </div>
 
             {showFormDialog && (
@@ -494,8 +457,8 @@ const handleImportConfirm = async () => {
                 created={importPreview.created}
                 onClose={() => setImportPreview(null)}
                 onConfirm={handleImportConfirm}
-                onUpdateAll={handleImportUpdateAll}
-                getLineName={(lineId) => getLineById(lineId)?.name || 'Unknown Line'}
+                onUpdateAll={handleImportConfirm}
+                getLineName={getLineName}
               />
             )}
           </div>

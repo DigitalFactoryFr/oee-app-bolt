@@ -33,7 +33,7 @@ const AuthCallback = () => {
 
           // If returnTo is set, navigate there
           if (returnTo) {
-            navigate(returnTo);
+            navigate(returnTo.replace('#', ''));
           }
           // If no projects, go to new project page
           else if (!projects.length) {
