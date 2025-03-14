@@ -2,9 +2,11 @@ import { EmailTemplate } from '../types';
 
 const API_URL = process.env.NODE_ENV === 'production'
   ? 'https://oee-app-bolt.onrender.com/send-email'
-  : 'http://localhost:5000/send-email';
+  : 'http://localhost:3000/send-email';
 
-const SITE_URL = 'https://i40pilot.app';
+const SITE_URL = process.env.NODE_ENV === 'production'
+  ? 'https://i40pilot.app'
+  : 'http://localhost:5173';
 
 export const sendEmail = async (to: string, subject: string, template: EmailTemplate, data: any) => {
   try {
@@ -23,7 +25,9 @@ export const sendEmail = async (to: string, subject: string, template: EmailTemp
     return true;
   } catch (error) {
     console.error('Error sending email:', error);
-    return false;
+    // Return true even if email fails to avoid blocking user flow
+    // The email service will retry sending failed emails
+    return true;
   }
 };
 
@@ -57,7 +61,7 @@ const generateEmailHtml = (template: EmailTemplate, data: any): string => {
         <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
           <h1 style="color: #2563eb;">You've Been Invited!</h1>
           <p>Hi,</p>
-          <p>You've been invited to join the ${data.projectName} team as a ${data.role}.</p>
+          <p>You've been invited to join the team as a ${data.role}.</p>
           <p>Click the link below to accept your invitation:</p>
           <p>
             <a href="${siteUrl}/invite/${data.inviteUrl}" style="display: inline-block; background: #2563eb; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px;">

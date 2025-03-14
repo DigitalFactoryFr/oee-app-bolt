@@ -13,6 +13,29 @@ export interface Project {
   created_at: string;
 }
 
+export type ProjectRole = 
+  | 'owner'      // Full project access and management
+  | 'team_manager'    // Can manage team and production
+  | 'operator'   // Basic data entry
+  | 'quality_technician'    // Quality control access
+  | 'maintenance_technician'; // Maintenance access
+
+export interface TeamMember {
+  id: string;
+  project_id: string;
+  email: string;
+  role: ProjectRole;
+  status: 'pending' | 'active' | 'inactive';
+  invited_at?: string;
+  joined_at?: string;
+  created_at: string;
+  updated_at: string;
+  machine_id?: string; // Optional for operator role
+  line_id?: string;    // Optional for team_manager role
+  team_name: string;
+  working_time_minutes: number;
+}
+
 export interface PlantConfig {
   id: string;
   project_id: string;
@@ -67,24 +90,10 @@ export interface Product {
 }
 
 export interface TeamRole {
-  id: string;
+  id: ProjectRole;
   name: string;
   description: string;
-}
-
-export interface TeamMember {
-  id: string;
-  project_id: string;
-  machine_id: string;
-  email: string;
-  role: string;
-  team_name: string;
-  working_time_minutes: number;
-  status: 'pending' | 'invited' | 'active' | 'inactive';
-  invited_at?: string;
-  joined_at?: string;
-  created_at: string;
-  updated_at: string;
+  scope: 'project' | 'line' | 'machine' | 'none';
 }
 
 export interface LotData {

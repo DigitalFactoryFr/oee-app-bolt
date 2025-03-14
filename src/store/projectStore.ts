@@ -47,27 +47,17 @@ export const useProjectStore = create<ProjectState>((set) => ({
       }
 
       set({ loading: true, error: null });
+
+      // Get all projects in a single query
       const { data, error } = await supabase
         .from('projects')
         .select('*')
-        .or(`user_id.eq.${user.id},id.in.(${
-          supabase
-            .from('team_members')
-            .select('project_id')
-            .eq('email', user.email)
-            .eq('status', 'active')
-            .then(({ data }) => data?.map(d => d.project_id).join(','))
-        })`)
         .order('created_at', { ascending: false });
-      
-      if (error) {
-        console.error("❌ Error fetching projects:", error);
-        throw error;
-      }
-      
+
+      if (error) throw error;
+
       console.log("✅ Projects fetched successfully:", data?.length || 0, "projects");
-      const projects = data as Project[];
-      set({ projects, loading: false, error: null });
+      set({ projects: data || [], loading: false });
     } catch (error) {
       console.error('Error fetching projects:', error);
       set({ error: (error as Error).message, loading: false });
@@ -84,17 +74,12 @@ export const useProjectStore = create<ProjectState>((set) => ({
         .eq('id', id)
         .single();
       
-      if (error) {
-        console.error("❌ Error fetching project:", error);
-        throw error;
-      }
+      if (error) throw error;
       
       console.log("✅ Project fetched successfully:", data?.name);
-      const project = data as Project;
       set({ 
-        currentProject: project,
-        loading: false,
-        error: null
+        currentProject: data as Project,
+        loading: false
       });
     } catch (error) {
       console.error('Error fetching project:', error);
@@ -109,12 +94,11 @@ export const useProjectStore = create<ProjectState>((set) => ({
       
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) {
-        console.error("❌ Error: User not authenticated");
         throw new Error('User not authenticated');
       }
       
-      console.log("👤 Creating project for user:", user.id);
-      const { data, error } = await supabase
+      // First create the project
+      const { data: project, error: projectError } = await supabase
         .from('projects')
         .insert([{
           name,
@@ -124,21 +108,29 @@ export const useProjectStore = create<ProjectState>((set) => ({
         .select()
         .single();
       
-      if (error) {
-        console.error("❌ Error creating project:", error);
-        throw error;
-      }
+      if (projectError) throw projectError;
       
-      console.log("✅ Project created successfully:", data);
-      const project = data as Project;
+      // Then create the owner team member record
+      const { error: teamError } = await supabase
+        .from('team_members')
+        .insert([{
+          project_id: project.id,
+          email: user.email,
+          role: 'owner',
+          status: 'active',
+          team_name: 'Owners',
+          working_time_minutes: 480
+        }]);
+      
+      if (teamError) throw teamError;
+      
       set((state) => ({ 
-        projects: [project, ...state.projects],
-        currentProject: project,
-        loading: false,
-        error: null
+        projects: [project as Project, ...state.projects],
+        currentProject: project as Project,
+        loading: false
       }));
       
-      return project;
+      return project as Project;
     } catch (error) {
       console.error('Error creating project:', error);
       set({ error: (error as Error).message, loading: false });
@@ -148,7 +140,6 @@ export const useProjectStore = create<ProjectState>((set) => ({
   
   updateProject: async (id, projectData) => {
     try {
-      console.log("📝 Updating project:", id, projectData);
       set({ loading: true, error: null });
       
       const { error } = await supabase
@@ -156,12 +147,8 @@ export const useProjectStore = create<ProjectState>((set) => ({
         .update(projectData)
         .eq('id', id);
       
-      if (error) {
-        console.error("❌ Error updating project:", error);
-        throw error;
-      }
+      if (error) throw error;
       
-      console.log("✅ Project updated successfully");
       set((state) => {
         const updatedProjects = state.projects.map(project => 
           project.id === id ? { ...project, ...projectData } : project
@@ -172,8 +159,7 @@ export const useProjectStore = create<ProjectState>((set) => ({
           currentProject: state.currentProject?.id === id 
             ? { ...state.currentProject, ...projectData }
             : state.currentProject,
-          loading: false,
-          error: null
+          loading: false
         };
       });
     } catch (error) {
@@ -184,7 +170,6 @@ export const useProjectStore = create<ProjectState>((set) => ({
   
   deleteProject: async (id) => {
     try {
-      console.log("🗑️ Deleting project:", id);
       set({ loading: true, error: null });
       
       const { error } = await supabase
@@ -192,17 +177,12 @@ export const useProjectStore = create<ProjectState>((set) => ({
         .delete()
         .eq('id', id);
       
-      if (error) {
-        console.error("❌ Error deleting project:", error);
-        throw error;
-      }
+      if (error) throw error;
       
-      console.log("✅ Project deleted successfully");
       set((state) => ({ 
         projects: state.projects.filter(project => project.id !== id),
         currentProject: state.currentProject?.id === id ? null : state.currentProject,
-        loading: false,
-        error: null
+        loading: false
       }));
     } catch (error) {
       console.error('Error deleting project:', error);

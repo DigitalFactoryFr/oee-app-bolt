@@ -18,31 +18,31 @@ export const useAuthStore = create<AuthState>((set) => ({
   user: null,
   loading: false,
   error: null,
-  
+
   signIn: async (email, password) => {
     try {
       set({ loading: true, error: null });
       const { data, error } = await supabase.auth.signInWithPassword({
         email,
-        password,
+        password
       });
-      
+
       if (error) throw error;
-      
+
       if (data.user) {
-        set({ 
+        set({
           user: {
             id: data.user.id,
-            email: data.user.email || '',
+            email: data.user.email || ''
           },
-          loading: false 
+          loading: false
         });
       }
     } catch (error) {
       set({ error: (error as Error).message, loading: false });
     }
   },
-  
+
   signUp: async (email, password) => {
     try {
       set({ loading: true, error: null });
@@ -53,26 +53,31 @@ export const useAuthStore = create<AuthState>((set) => ({
           emailRedirectTo: 'https://i40pilot.app/auth/callback'
         }
       });
-      
+
       if (error) throw error;
-      
+
       if (data.user) {
         // Send welcome email
-        await sendEmail(email, 'Welcome to Pilot!', 'WELCOME', { email });
-        
-        set({ 
+        await sendEmail(
+          email,
+          'Welcome to Pilot!',
+          'WELCOME',
+          { email }
+        );
+
+        set({
           user: {
             id: data.user.id,
-            email: data.user.email || '',
+            email: data.user.email || ''
           },
-          loading: false 
+          loading: false
         });
       }
     } catch (error) {
       set({ error: (error as Error).message, loading: false });
     }
   },
-  
+
   signOut: async () => {
     try {
       set({ loading: true });
@@ -82,24 +87,24 @@ export const useAuthStore = create<AuthState>((set) => ({
       set({ error: (error as Error).message, loading: false });
     }
   },
-  
+
   getUser: async () => {
     try {
       set({ loading: true });
-      const { data, error } = await supabase.auth.getUser();
-      
+      const { data: { user }, error } = await supabase.auth.getUser();
+
       if (error) {
         set({ user: null, loading: false });
         return;
       }
-      
-      if (data.user) {
-        set({ 
+
+      if (user) {
+        set({
           user: {
-            id: data.user.id,
-            email: data.user.email || '',
+            id: user.id,
+            email: user.email || ''
           },
-          loading: false 
+          loading: false
         });
       } else {
         set({ user: null, loading: false });

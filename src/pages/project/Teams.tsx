@@ -5,17 +5,19 @@ import { Upload, Check, AlertCircle, Download, Plus, Trash2, Edit2, Mail } from 
 import ProjectLayout from '../../components/layout/ProjectLayout';
 import { useTeamStore } from '../../store/teamStore';
 import { useMachineStore } from '../../store/machineStore';
+import { useProductionLineStore } from '../../store/productionLineStore';
 import { useOnboardingStore } from '../../store/onboardingStore';
 import { parseTeamExcel, generateTeamTemplate } from '../../utils/excelParser';
 import TeamFormDialog from '../../components/teams/TeamFormDialog';
 import TeamImportPreview from '../../components/teams/TeamImportPreview';
-import type { TeamMember, TeamRole } from '../../types';
+import type { TeamMember } from '../../types';
 
 interface TeamFormData {
   email: string;
   role: string;
   team_name: string;
-  machine_id: string;
+  machine_id?: string;
+  line_id?: string;
   working_time_minutes: number;
 }
 
@@ -24,6 +26,7 @@ const TeamsPage: React.FC = () => {
   const navigate = useNavigate();
   const { members, roles, loading: teamLoading, error, fetchMembers, fetchRoles, createMember, updateMember, deleteMember, bulkCreateMembers, bulkInviteMembers } = useTeamStore();
   const { machines, loading: machinesLoading, fetchMachines } = useMachineStore();
+  const { lines, loading: linesLoading, fetchLines } = useProductionLineStore();
   const { updateStepStatus } = useOnboardingStore();
   
   const [isExcelMode, setIsExcelMode] = useState(false);
@@ -45,15 +48,16 @@ const TeamsPage: React.FC = () => {
     formState: { errors }
   } = useForm<TeamFormData>();
 
-  const selectedMachineId = watch('machine_id');
+  const selectedRole = watch('role');
 
   useEffect(() => {
     if (projectId) {
       fetchMembers(projectId);
       fetchMachines(projectId);
+      fetchLines(projectId);
       fetchRoles();
     }
-  }, [projectId, fetchMembers, fetchMachines, fetchRoles]);
+  }, [projectId]);
 
   useEffect(() => {
     if (editingMember) {
@@ -61,6 +65,7 @@ const TeamsPage: React.FC = () => {
       setValue('role', editingMember.role);
       setValue('team_name', editingMember.team_name);
       setValue('machine_id', editingMember.machine_id);
+      setValue('line_id', editingMember.line_id);
       setValue('working_time_minutes', editingMember.working_time_minutes);
       setShowFormDialog(true);
     } else {
@@ -69,6 +74,7 @@ const TeamsPage: React.FC = () => {
         role: '',
         team_name: '',
         machine_id: '',
+        line_id: '',
         working_time_minutes: 480
       });
     }
@@ -78,11 +84,32 @@ const TeamsPage: React.FC = () => {
     if (!projectId) return;
 
     try {
+      const selectedRoleDetails = roles.find(r => r.id === data.role);
+      if (!selectedRoleDetails) throw new Error('Invalid role selected');
+
+      let machineId = null;
+      let lineId = null;
+
+      // Set scope-specific IDs based on role
+      switch (selectedRoleDetails.scope) {
+        case 'machine':
+          machineId = data.machine_id || null;
+          break;
+        case 'line':
+          lineId = data.line_id || null;
+          break;
+        // For project and none scopes, no additional IDs needed
+      }
+
       if (editingMember) {
-        await updateMember(editingMember.id, data);
+        await updateMember(editingMember.id, {
+          ...data,
+          machine_id: machineId,
+          line_id: lineId
+        });
         setEditingMember(null);
       } else {
-        await createMember(projectId, data.machine_id, data);
+        await createMember(projectId, machineId, lineId, data);
       }
 
       setShowFormDialog(false);
@@ -104,7 +131,10 @@ const TeamsPage: React.FC = () => {
         
         if (!result.success) {
           setImportPreview({
-            errors: result.errors,
+            errors: result.errors.map((error, index) => ({
+              row: index + 2,
+              message: error.message
+            })),
             members: result.created
           });
         } else if (result.created.length > 0) {
@@ -147,6 +177,7 @@ const TeamsPage: React.FC = () => {
     await deleteMember(id);
     setShowDeleteConfirm(null);
     await fetchMembers(projectId);
+  
   };
 
   const handleEdit = (member: TeamMember) => {
@@ -164,15 +195,6 @@ const TeamsPage: React.FC = () => {
     reset();
   };
 
-  const handleInviteMembers = async (members: TeamMember[]) => {
-    try {
-      await bulkInviteMembers(members);
-      await fetchMembers(projectId);
-    } catch (error) {
-      console.error('Error inviting members:', error);
-    }
-  };
-
   const handleContinueToData = () => {
     if (projectId) {
       updateStepStatus('teams', 'completed');
@@ -180,19 +202,19 @@ const TeamsPage: React.FC = () => {
     }
   };
 
-  const getRoleById = (roleId: string): TeamRole | undefined => {
+  const getRoleById = (roleId: string) => {
     return roles.find(role => role.id === roleId);
   };
 
-  const getMachineById = (machineId: string) => {
-    return machines.find(machine => machine.id === machineId);
+  const getMachineById = (machineId?: string) => {
+    return machineId ? machines.find(machine => machine.id === machineId) : undefined;
   };
 
-  const getMembersForMachine = (machineId: string): TeamMember[] => {
-    return members.filter(member => member.machine_id === machineId);
+  const getLineById = (lineId?: string) => {
+    return lineId ? lines.find(line => line.id === lineId) : undefined;
   };
 
-  const loading = teamLoading || machinesLoading;
+  const loading = teamLoading || machinesLoading || linesLoading;
 
   return (
     <ProjectLayout>
@@ -306,80 +328,87 @@ const TeamsPage: React.FC = () => {
                   )}
                 </div>
 
-                {machines.length === 0 ? (
-                  <div className="text-center py-12">
-                    <h3 className="text-lg font-medium text-gray-900">No Machines</h3>
-                    <p className="mt-2 text-sm text-gray-500">
-                      You need to configure machines before adding team members.
-                    </p>
-                    <div className="mt-6">
-                      <button
-                        onClick={() => navigate(`/projects/${projectId}/onboarding/machines`)}
-                        className="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+                <div className="space-y-4">
+                  {members.map((member) => {
+                    const role = getRoleById(member.role);
+                    const machine = getMachineById(member.machine_id);
+                    const line = getLineById(member.line_id);
+
+                    return (
+                      <div
+                        key={member.id}
+                        className="bg-gray-50 p-4 rounded-lg"
                       >
-                        Configure Machines
-                      </button>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="space-y-6">
-                    {machines.map((machine) => (
-                      <div key={machine.id} className="bg-gray-50 p-4 rounded-lg">
-                        <h4 className="text-lg font-medium text-gray-900 mb-4">{machine.name}</h4>
-                        <div className="space-y-4">
-                          {getMembersForMachine(machine.id).map((member) => (
-                            <div
-                              key={member.id}
-                              className="bg-white p-4 rounded-lg shadow-sm flex items-center justify-between"
-                            >
-                              <div>
-                                <h5 className="text-sm font-medium text-gray-900">{member.email}</h5>
-                                <p className="mt-1 text-sm text-gray-500">
-                                  {getRoleById(member.role)?.name} - {member.team_name}
-                                </p>
-                                <p className="mt-1 text-sm text-gray-500">
-                                  Working time: {member.working_time_minutes} minutes
-                                </p>
-                                <div className="mt-2">
-                                  <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                                    member.status === 'active' ? 'bg-green-100 text-green-800' :
-                                    member.status === 'invited' ? 'bg-blue-100 text-blue-800' :
-                                    member.status === 'inactive' ? 'bg-red-100 text-red-800' :
-                                    'bg-gray-100 text-gray-800'
-                                  }`}>
-                                    {member.status.charAt(0).toUpperCase() + member.status.slice(1)}
-                                  </span>
-                                </div>
-                              </div>
-                              <div className="flex space-x-2">
-                                {member.status === 'pending' && (
-                                  <button
-                                    onClick={() => handleInviteMembers([member])}
-                                    className="p-2 text-gray-400 hover:text-blue-500"
-                                  >
-                                    <Mail className="h-5 w-5" />
-                                  </button>
-                                )}
-                                <button
-                                  onClick={() => handleEdit(member)}
-                                  className="p-2 text-gray-400 hover:text-blue-500"
-                                >
-                                  <Edit2 className="h-5 w-5" />
-                                </button>
-                                <button
-                                  onClick={() => handleDelete(member.id)}
-                                  className="p-2 text-gray-400 hover:text-red-500"
-                                >
-                                  <Trash2 className="h-5 w-5" />
-                                </button>
-                              </div>
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <h4 className="text-sm font-medium text-gray-900">{member.email}</h4>
+                            <p className="mt-1 text-sm text-gray-500">
+                              {role?.name} - {member.team_name}
+                            </p>
+                            {machine && (
+                              <p className="mt-1 text-sm text-gray-500">
+                                Machine: {machine.name}
+                              </p>
+                            )}
+                            {line && (
+                              <p className="mt-1 text-sm text-gray-500">
+                                Line: {line.name}
+                              </p>
+                            )}
+                            <p className="mt-1 text-sm text-gray-500">
+                              Working time: {member.working_time_minutes} minutes
+                            </p>
+                            <div className="mt-2">
+                              <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                                member.status === 'active' ? 'bg-green-100 text-green-800' :
+                                member.status === 'invited' ? 'bg-blue-100 text-blue-800' :
+                                member.status === 'inactive' ? 'bg-red-100 text-red-800' :
+                                'bg-gray-100 text-gray-800'
+                              }`}>
+                                {member.status.charAt(0).toUpperCase() + member.status.slice(1)}
+                              </span>
                             </div>
-                          ))}
+                          </div>
+                          <div className="flex space-x-2">
+                            {member.status === 'pending' && (
+                              <button
+                                onClick={() => bulkInviteMembers([member])}
+                                className="p-2 text-gray-400 hover:text-blue-500"
+                              >
+                                <Mail className="h-5 w-5" />
+                              </button>
+                            )}
+                            <button
+                              onClick={() => handleEdit(member)}
+                              className="p-2 text-gray-400 hover:text-blue-500"
+                            >
+                              <Edit2 className="h-5 w-5" />
+                            </button>
+                            <button
+                              onClick={() => handleDelete(member.id)}
+                              className="p-2 text-gray-400 hover:text-red-500"
+                            >
+                              <Trash2 className="h-5 w-5" />
+                            </button>
+                          </div>
                         </div>
                       </div>
-                    ))}
-                  </div>
-                )}
+                    );
+                  })}
+
+                  {members.length === 0 && (
+                    <div className="text-center py-12">
+                      <p className="text-sm text-gray-500">No team members yet</p>
+                      <button
+                        onClick={handleAddNew}
+                        className="mt-4 inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700"
+                      >
+                        <Plus className="h-4 w-4 mr-2" />
+                        Add First Member
+                      </button>
+                    </div>
+                  )}
+                </div>
               </div>
 
               {members.length > 0 && (
@@ -409,12 +438,13 @@ const TeamsPage: React.FC = () => {
               <TeamFormDialog
                 member={editingMember}
                 machines={machines}
+                lines={lines}
                 roles={roles}
                 onSubmit={handleSubmit(onSubmit)}
                 onClose={handleCloseDialog}
                 register={register}
                 errors={errors}
-                selectedMachineId={selectedMachineId}
+                selectedRole={selectedRole}
               />
             )}
 

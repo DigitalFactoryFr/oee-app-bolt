@@ -1,11 +1,32 @@
 [build]
   command = "npm install && npm run build"
-  functions = "functions"  # Assurez-vous que les fonctions sont bien stockées ici
-
-[dev]
-  functionsPort = 9999
+  functions = "functions"
+  publish = "dist"
 
 [[redirects]]
   from = "/*"
   to = "/index.html"
   status = 200
+
+[[redirects]]
+  from = "/auth/callback"
+  to = "/index.html"
+  status = 200
+
+[[redirects]]
+  from = "/invite/*"
+  to = "/index.html"
+  status = 200
+
+[[redirects]]
+  from = "/success"
+  to = "/index.html"
+  status = 200
+
+[[redirects]]
+  from = "/cancel"
+  to = "/index.html"
+  status = 200
+
+[dev]
+  functionsPort = 9999
