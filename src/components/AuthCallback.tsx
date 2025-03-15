@@ -15,6 +15,7 @@ const AuthCallback = () => {
     const handleAuthCallback = async () => {
       console.log('[AuthCallback] Début du callback');
       try {
+        console.log('[AuthCallback] supabase.auth:', supabase.auth);
         console.log('[AuthCallback] Appel de getSessionFromUrl avec storeSession: true');
         const { data, error } = await supabase.auth.getSessionFromUrl({ storeSession: true });
         console.log('[AuthCallback] Réponse de getSessionFromUrl:', { data, error });
