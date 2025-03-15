@@ -3,10 +3,6 @@ import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { useAuthStore } from '../store/authStore';
 import { useProjectStore } from '../store/projectStore';
-import { useNavigate } from 'react-router-dom
-
-
-
 
 export default function AuthCallback() {
   const navigate = useNavigate();
@@ -14,54 +10,50 @@ export default function AuthCallback() {
   const { fetchProjects, projects } = useProjectStore();
 
   useEffect(() => {
-    // On s'inscrit à l'événement de changement d'état d'authentification
-    const { data: authListener } = supabase.auth.onAuthStateChange(
-      async (event, session) => {
-        console.log('[AuthCallback] onAuthStateChange =>', event, session);
+    const checkAuth = async () => {
+      const { data: { session }, error } = await supabase.auth.getSession();
 
-        // Si l'utilisateur vient de se connecter
-        if (event === 'SIGNED_IN' && session?.user) {
-          try {
-            // 1. Mettre à jour le store avec l'utilisateur
-            setUser({
-              id: session.user.id,
-              email: session.user.email ?? '',
-            });
-
-            // 2. Charger les projets de l'utilisateur
-            await fetchProjects();
-
-            // 3. Rediriger selon la présence de projets
-            if (!projects || projects.length === 0) {
-              console.log('[AuthCallback] Aucun projet => /projects/new');
-              navigate('/projects/new', { replace: true });
-            } else {
-              console.log('[AuthCallback] Au moins un projet => /dashboard');
-              navigate('/dashboard', { replace: true });
-            }
-          } catch (err) {
-            console.error('[AuthCallback] Erreur:', err);
-            setError('Erreur lors de la récupération des projets');
-            navigate('/auth', { replace: true });
-          }
-        }
-
-        // Important : NE RETOURNEZ RIEN dans cette callback
-        // pour éviter "TypeError: t is not a function".
+      if (error) {
+        console.error("[AuthCallback] Erreur lors de la récupération de la session :", error);
+        setError("Erreur lors de la récupération de la session.");
+        navigate('/auth', { replace: true });
+        return;
       }
-    );
 
-    // On désinscrit le listener lors du démontage du composant
-    return () => {
-      authListener?.unsubscribe();
+      if (session?.user) {
+        console.log("[AuthCallback] Utilisateur authentifié :", session.user);
+        setUser({
+          id: session.user.id,
+          email: session.user.email ?? '',
+        });
+
+        try {
+          await fetchProjects();
+          if (!projects || projects.length === 0) {
+            console.log('[AuthCallback] Aucun projet trouvé, redirection vers /projects/new');
+            navigate('/projects/new', { replace: true });
+          } else {
+            console.log('[AuthCallback] Projets trouvés, redirection vers /dashboard');
+            navigate('/dashboard', { replace: true });
+          }
+        } catch (err) {
+          console.error("[AuthCallback] Erreur lors de la récupération des projets :", err);
+          setError("Impossible de récupérer les projets.");
+          navigate('/auth', { replace: true });
+        }
+      } else {
+        console.warn("[AuthCallback] Aucun utilisateur connecté, redirection vers /auth");
+        navigate('/auth', { replace: true });
+      }
     };
+
+    checkAuth();
   }, [navigate, setUser, setError, fetchProjects]);
-  // Note: on n'ajoute pas "projects" dans le tableau de dépendances
-  // pour éviter un re-render infini si la liste de projets change.
 
   return (
     <div className="flex justify-center items-center h-screen">
       <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+      <p className="text-gray-600 mt-4">Connexion en cours...</p>
     </div>
   );
 }
