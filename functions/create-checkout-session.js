@@ -7,9 +7,8 @@ exports.handler = async (event) => {
       return { statusCode: 405, body: "Method not allowed" };
     }
 
-    // ►►► On récupère machineCount du body
     const { machineCount } = JSON.parse(event.body);
-
+    
     if (!machineCount || machineCount < 1) {
       return { 
         statusCode: 400, 
@@ -17,36 +16,31 @@ exports.handler = async (event) => {
       };
     }
 
-    // Prix unitaire : 39€ => 3900 centimes
-    const unitAmount = 3900;
-
-    // Créer la session de checkout (mode subscription)
+    // Calculate price based on number of machines (€39 per machine)
+    const unitAmount = 3900; // €39.00 in cents
+    
     const session = await stripe.checkout.sessions.create({
       payment_method_types: ["card"],
       mode: "subscription",
-      line_items: [
-        {
-          price_data: {
-            currency: 'eur',
-            product_data: {
-              name: 'Pilot Pro Subscription',
-              // ►►► On précise dans la description le nb de machines
-              description: `${machineCount} machine(s) × 39€/month`,
-            },
-            unit_amount: unitAmount,
-            recurring: {
-              interval: 'month',
-            },
+      line_items: [{
+        price_data: {
+          currency: 'eur',
+          product_data: {
+            name: 'Pilot Pro Subscription',
+            description: `${machineCount} machine${machineCount > 1 ? 's' : ''} × €39/month`,
           },
-          quantity: machineCount,
+          unit_amount: unitAmount,
+          recurring: {
+            interval: 'month'
+          }
         },
-      ],
+        quantity: machineCount
+      }],
       success_url: `${process.env.SITE_URL}/success?session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${process.env.SITE_URL}/cancel`,
-      // ►►► On stocke la valeur de machineCount dans metadata
       metadata: {
-        machineCount: machineCount.toString(),
-      },
+        machineCount: machineCount.toString()
+      }
     });
 
     return { 
@@ -55,9 +49,9 @@ exports.handler = async (event) => {
     };
   } catch (error) {
     console.error("Stripe error:", error);
-    return {
-      statusCode: 500,
-      body: JSON.stringify({ error: error.message })
+    return { 
+      statusCode: 500, 
+      body: JSON.stringify({ error: error.message }) 
     };
   }
 };
