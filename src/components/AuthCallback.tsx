@@ -15,16 +15,24 @@ const AuthCallback = () => {
     const handleAuthCallback = async () => {
       console.log('[AuthCallback] Début du callback');
 
-      // Vérification des variables d'environnement
+      // Afficher les variables d'environnement pour vérification
       console.log('[AuthCallback] Variables d\'environnement:', {
         supabaseUrl: import.meta.env.VITE_SUPABASE_URL,
         supabaseAnonKey: import.meta.env.VITE_SUPABASE_ANON_KEY,
       });
 
-      // Inspection de l'instance Supabase et de l'objet auth
+      // Inspecter l'instance supabase et l'objet auth
       console.log('[AuthCallback] Instance supabase:', supabase);
       console.log('[AuthCallback] supabase.auth:', supabase.auth);
       console.log('[AuthCallback] getSessionFromUrl:', supabase.auth.getSessionFromUrl);
+
+      // Vérifier que la méthode getSessionFromUrl existe
+      if (typeof supabase.auth.getSessionFromUrl !== 'function') {
+        console.error('[AuthCallback] getSessionFromUrl n\'est pas défini.');
+        setError("La méthode getSessionFromUrl n'est pas disponible. Vérifiez votre version ou la configuration de @supabase/supabase-js.");
+        navigate('/auth');
+        return;
+      }
 
       try {
         console.log('[AuthCallback] Appel de getSessionFromUrl avec storeSession: true');
