@@ -79,7 +79,7 @@ export const useProjectStore = create<ProjectState>((set) => ({
   },
 
   /** 🔹 Récupère tous les projets de l'utilisateur */
-  fetchProjects: async () => {
+fetchProjects: async () => {
   try {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) {
@@ -94,29 +94,33 @@ export const useProjectStore = create<ProjectState>((set) => ({
     const { data, error } = await supabase
       .from('projects')
       .select('*')
-      .eq('user_id', user.id) // 🔹 Charge uniquement les projets de l'utilisateur
+      .eq('user_id', user.id)
       .order('created_at', { ascending: false });
 
     if (error) throw error;
 
-    set({ projects: data || [], loading: false });
+    if (!data || data.length === 0) {
+      console.warn("[ProjectStore] 🚨 Aucun projet trouvé, affichage de 'My First Project' temporaire");
+      
+      // 🔹 On affiche un projet temporaire sans l'enregistrer en base de données
+      set({
+        projects: [],
+        currentProject: { id: 'default', name: 'My First Project', user_id: user.id },
+        loading: false
+      });
 
-    set((state) => {
-      if (data.length > 0) {
-        console.log("[ProjectStore] ✅ Sélection du premier projet :", data[0]);
-        localStorage.setItem('currentProject', JSON.stringify(data[0]));
-        return { currentProject: data[0] };
-      }
+      return;
+    }
 
-      console.warn("[ProjectStore] 🚨 Aucun projet trouvé, assignation de 'My First Project'");
-      return { currentProject: { id: 'default', name: 'My First Project', user_id: user.id } };
-    });
+    set({ projects: data, currentProject: data[0], loading: false });
+    localStorage.setItem('currentProject', JSON.stringify(data[0]));
 
   } catch (error) {
     console.error('Error fetching projects:', error);
     set({ error: (error as Error).message, loading: false });
   }
 },
+
 
 
 
