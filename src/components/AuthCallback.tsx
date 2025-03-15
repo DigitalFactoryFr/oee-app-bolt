@@ -15,28 +15,44 @@ const AuthCallback = () => {
     const handleAuthCallback = async () => {
       console.log('[AuthCallback] Début du callback');
 
-      // Vérification des variables d'environnement
+      // Afficher les variables d'environnement (pour vérifier qu'elles sont bien définies)
       console.log('[AuthCallback] Variables d\'environnement:', {
         supabaseUrl: import.meta.env.VITE_SUPABASE_URL,
         supabaseAnonKey: import.meta.env.VITE_SUPABASE_ANON_KEY,
       });
 
-      // Inspection de l'instance supabase et de l'objet auth
+      // Inspection de l'instance Supabase et de l'objet auth
       console.log('[AuthCallback] Instance supabase:', supabase);
       console.log('[AuthCallback] supabase.auth:', supabase.auth);
-      console.log('[AuthCallback] getSessionFromUrl:', supabase.auth.getSessionFromUrl);
+      console.log(
+        '[AuthCallback] Méthodes disponibles dans supabase.auth:',
+        Object.keys(supabase.auth)
+      );
 
-      if (typeof supabase.auth.getSessionFromUrl !== 'function') {
-        console.error('[AuthCallback] getSessionFromUrl n\'est pas défini.');
-        setError("La méthode getSessionFromUrl n'est pas disponible. Vérifiez votre configuration de @supabase/supabase-js.");
+      // Essayons d'utiliser getSessionFromUrl ou, en fallback, exchangeCodeForSession
+      const getSession =
+        supabase.auth.getSessionFromUrl || supabase.auth.exchangeCodeForSession;
+
+      if (typeof getSession !== 'function') {
+        console.error(
+          '[AuthCallback] Ni getSessionFromUrl ni exchangeCodeForSession ne sont définies.'
+        );
+        setError(
+          "La méthode d'échange du code n'est pas disponible. Vérifiez votre configuration de @supabase/supabase-js."
+        );
         navigate('/auth');
         return;
       }
 
       try {
-        console.log('[AuthCallback] Appel de getSessionFromUrl avec storeSession: true');
-        const { data, error } = await supabase.auth.getSessionFromUrl({ storeSession: true });
-        console.log('[AuthCallback] Réponse de getSessionFromUrl:', { data, error });
+        console.log(
+          '[AuthCallback] Appel de la méthode d\'échange du code avec storeSession: true'
+        );
+        // Notez l'utilisation de .call pour s'assurer que le "this" est correctement lié
+        const { data, error } = await getSession.call(supabase.auth, {
+          storeSession: true,
+        });
+        console.log('[AuthCallback] Réponse de la méthode d\'échange:', { data, error });
 
         if (error) {
           console.error('[AuthCallback] Erreur lors de l\'échange du token:', error);
@@ -69,12 +85,12 @@ const AuthCallback = () => {
           }
         } else {
           console.error('[AuthCallback] Aucune session utilisateur trouvée dans data');
-          setError('Unable to retrieve user session.');
+          setError('Impossible de récupérer la session utilisateur.');
           navigate('/auth');
         }
       } catch (err) {
         console.error('[AuthCallback] Exception attrapée:', err);
-        setError('An error occurred during authentication');
+        setError("Une erreur s'est produite lors de l'authentification");
         navigate('/auth');
       }
     };
