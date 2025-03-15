@@ -14,45 +14,27 @@ const AuthCallback = () => {
   useEffect(() => {
     const handleAuthCallback = async () => {
       console.log('[AuthCallback] Début du callback');
+      console.log('[AuthCallback] window.location.href:', window.location.href);
+      console.log('[AuthCallback] window.location.search:', window.location.search);
 
-      // Afficher les variables d'environnement (pour vérifier qu'elles sont bien définies)
-      console.log('[AuthCallback] Variables d\'environnement:', {
-        supabaseUrl: import.meta.env.VITE_SUPABASE_URL,
-        supabaseAnonKey: import.meta.env.VITE_SUPABASE_ANON_KEY,
-      });
+      // Extraction manuelle du paramètre "code"
+      const code = searchParams.get('code');
+      console.log('[AuthCallback] Code extrait:', code);
 
-      // Inspection de l'instance Supabase et de l'objet auth
-      console.log('[AuthCallback] Instance supabase:', supabase);
-      console.log('[AuthCallback] supabase.auth:', supabase.auth);
-      console.log(
-        '[AuthCallback] Méthodes disponibles dans supabase.auth:',
-        Object.keys(supabase.auth)
-      );
-
-      // Essayons d'utiliser getSessionFromUrl ou, en fallback, exchangeCodeForSession
-      const getSession =
-        supabase.auth.getSessionFromUrl || supabase.auth.exchangeCodeForSession;
-
-      if (typeof getSession !== 'function') {
-        console.error(
-          '[AuthCallback] Ni getSessionFromUrl ni exchangeCodeForSession ne sont définies.'
-        );
-        setError(
-          "La méthode d'échange du code n'est pas disponible. Vérifiez votre configuration de @supabase/supabase-js."
-        );
+      if (!code) {
+        console.error('[AuthCallback] Aucun code trouvé dans l\'URL');
+        setError("Aucun code trouvé dans l'URL");
         navigate('/auth');
         return;
       }
 
       try {
-        console.log(
-          '[AuthCallback] Appel de la méthode d\'échange du code avec storeSession: true'
-        );
-        // Notez l'utilisation de .call pour s'assurer que le "this" est correctement lié
-        const { data, error } = await getSession.call(supabase.auth, {
+        console.log('[AuthCallback] Appel de exchangeCodeForSession avec le code:', code);
+        // Appel de exchangeCodeForSession en passant le code extrait
+        const { data, error } = await supabase.auth.exchangeCodeForSession(code, {
           storeSession: true,
         });
-        console.log('[AuthCallback] Réponse de la méthode d\'échange:', { data, error });
+        console.log('[AuthCallback] Réponse de exchangeCodeForSession:', { data, error });
 
         if (error) {
           console.error('[AuthCallback] Erreur lors de l\'échange du token:', error);
