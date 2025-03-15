@@ -66,34 +66,35 @@ const Dashboard: React.FC = () => {
 
 
 useEffect(() => {
-  if (!user) {
-    getUser()
-      .then(() => {
-        if (!user) {
-          console.warn("[Dashboard] ⚠️ Utilisateur non trouvé, redirection vers /auth");
-          navigate('/auth', { replace: true });
-        }
-      })
-      .catch((err) => {
-        console.error("[Dashboard] ❌ Erreur lors de la récupération de l'utilisateur:", err);
-        setError("Erreur de connexion. Veuillez vous reconnecter.");
-        navigate('/auth', { replace: true });
-      });
-  } else {
-    fetchProjects().then(() => setLoading(false)); // ✅ Ajout d'un état de chargement
-  }
+  const loadProjects = async () => {
+    if (!user) {
+      console.warn("[Dashboard] ⚠️ Utilisateur non trouvé, redirection vers /auth");
+      navigate('/auth', { replace: true });
+      return;
+    }
+
+    await fetchProjects();
+    setLoading(false);
+  };
+
+  loadProjects();
 }, [user, navigate]);
 
-
+// ✅ Empêche la redirection prématurée vers /projects/new
 useEffect(() => {
-  if (!loading && projects.length === 0) {
-    console.warn("[Dashboard] ⚠️ Aucun projet trouvé, redirection vers /projects/new");
-    navigate('/projects/new', { replace: true });
-  } else if (projects.length > 0 && !currentProject) {
-    console.log("[Dashboard] ✅ Sélection automatique du premier projet");
-    setCurrentProject(projects[0]);
+  if (!loading && projects.length === 0 && !currentProject) {
+    console.warn("[Dashboard] 🚨 Aucun projet trouvé, affichage temporaire de 'My First Project'");
+    setTimeout(() => setCurrentProject({ id: 'default', name: 'My First Project' }), 0);
+  } else if (!loading && projects.length > 0 && !currentProject) {
+    console.log("[Dashboard] ✅ Sélection automatique du premier projet :", projects[0].name);
+    setTimeout(() => setCurrentProject(projects[0]), 0);
   }
-}, [loading, projects, currentProject, navigate, setCurrentProject]);
+}, [loading, projects, currentProject, setCurrentProject]);
+
+
+
+
+
 
   useEffect(() => {
     if (currentProject?.id) {
