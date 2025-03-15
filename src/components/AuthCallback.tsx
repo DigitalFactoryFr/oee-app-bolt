@@ -9,49 +9,26 @@ export default function AuthCallback() {
   const { setUser, setError } = useAuthStore();
   const { fetchProjects, projects } = useProjectStore();
 
-  useEffect(() => {
-    const fetchUserAndProjects = async () => {
-      console.log("[AuthCallback] 🔄 Vérification de la session en cours...");
+useEffect(() => {
+  const checkUserSession = async () => {
+    console.log("[AuthCallback] 🔄 Vérification de la session...");
+    await getUser(); // Appelle la fonction `getUser()`
 
-      // 🔹 Vérifie la session Supabase
-      const { data: { session }, error } = await supabase.auth.getSession();
+    const { user } = useAuthStore.getState();
+    if (user) {
+      console.log("[AuthCallback] ✅ Utilisateur trouvé, redirection vers le tableau de bord...");
+      navigate('/dashboard', { replace: true });
+    } else {
+      console.log("[AuthCallback] ❌ Aucun utilisateur trouvé, redirection vers connexion.");
+      navigate('/auth', { replace: true });
+    }
+  };
 
-      if (error) {
-        console.error("[AuthCallback] ❌ Erreur de récupération de session :", error);
-        navigate('/auth', { replace: true });
-        return;
-      }
+  setTimeout(() => {
+    checkUserSession();
+  }, 2000);
+}, [navigate]);
 
-      if (!session || !session.user) {
-        console.log("[AuthCallback] ❌ Aucun utilisateur trouvé, redirection vers /auth");
-        navigate('/auth', { replace: true });
-        return;
-      }
-
-      console.log("[AuthCallback] ✅ Utilisateur détecté :", session.user);
-      setUser({
-        id: session.user.id,
-        email: session.user.email ?? '',
-      });
-
-      // 🔄 Chargement des projets
-      await fetchProjects();
-      console.log("[AuthCallback] ✅ Projets récupérés :", projects);
-
-      // 🔀 Redirection en fonction de la présence de projets
-      setTimeout(() => {
-        if (projects.length > 0) {
-          console.log("[AuthCallback] 📂 Redirection vers /dashboard");
-          navigate('/dashboard', { replace: true });
-        } else {
-          console.log("[AuthCallback] 🆕 Aucun projet => Redirection vers /projects/new");
-          navigate('/projects/new', { replace: true });
-        }
-      }, 500);
-    };
-
-    fetchUserAndProjects();
-  }, [navigate, setUser, setError, fetchProjects, projects.length]);
 
   return (
     <div className="flex flex-col justify-center items-center h-screen">

@@ -26,6 +26,9 @@ import { useTeamStore } from '../store/teamStore';
 import { useSubscriptionStore } from '../store/subscriptionStore';
 import { supabase } from '../lib/supabase';
 import UpgradePrompt from '../components/UpgradePrompt';
+import { useNavigate } from 'react-router-dom';
+import { useAuthStore } from '../store/authStore'; // 🔹 Ajoute l'import
+
 
 interface RecentEvent {
   id: string;
@@ -57,28 +60,130 @@ const Dashboard: React.FC = () => {
   const [recentEvents, setRecentEvents] = useState<RecentEvent[]>([]);
   const [recommendations, setRecommendations] = useState<Recommendation[]>([]);
   const [loading, setLoading] = useState(true);
+   const navigate = useNavigate();
+    const { user, getUser } = useAuthStore();
+    const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    console.log("[Dashboard] 🚀 Chargement des projets...");
-    fetchProjects();
-  }, [fetchProjects]);
 
-  useEffect(() => {
-    if (currentProject?.id) {
-      const fetchData = async () => {
-        await Promise.all([
-          fetchMachines(currentProject.id),
-          fetchProducts(currentProject.id),
-          fetchMembers(currentProject.id),
-          fetchSubscription(currentProject.id),
-          loadRecentEvents(),
-          generateRecommendations()
-        ]);
-      };
-      fetchData();
+useEffect(() => {
+  const checkUserAndFetchProjects = async () => {
+    try {
+      if (!user) {
+        await getUser();
+        if (!user) {
+          console.warn("[Dashboard] ⚠️ Utilisateur non trouvé, redirection vers /auth");
+          navigate('/auth', { replace: true });
+          return;
+        }
+      }
+
+      console.warn("[Dashboard] 🔄 Vérification de l'utilisateur et chargement des projets.");
+      localStorage.removeItem('currentProject'); // 🔹 Nettoie l'ancien projet si l'utilisateur change
+      setCurrentProject(null);
+      await fetchProjects();
+    } catch (err) {
+      console.error("[Dashboard] ❌ Erreur lors de la récupération de l'utilisateur:", err);
+      setError("Erreur de connexion. Veuillez vous reconnecter.");
+      navigate('/auth', { replace: true });
     }
-  }, [currentProject?.id]);
+  };
 
+  checkUserAndFetchProjects();
+}, [user, navigate]);
+
+useEffect(() => {
+  if (!loading && projects.length === 0) {
+    console.warn("[Dashboard] 🚨 Aucun projet trouvé, assignation de 'My First Project'");
+    setCurrentProject({ id: 'default', name: 'My First Project' });
+  } else if (!loading && currentProject && !projects.some(p => p.id === currentProject.id)) {
+    console.warn("[Dashboard] ❌ Projet non autorisé ou inexistant, redirection vers /projects/new");
+    setCurrentProject(null);
+    navigate('/projects/new', { replace: true });
+  }
+}, [loading, projects, currentProject, navigate]);
+
+
+// Affichage du loader avant de savoir si l'utilisateur est autorisé
+if (loading) {
+  return (
+    <div className="flex items-center justify-center min-h-screen">
+      <p className="text-lg text-gray-500">Chargement en cours...</p>
+    </div>
+  );
+}
+
+
+useEffect(() => {
+  if (currentProject?.id) {
+    const fetchData = async () => {
+      await Promise.all([
+        fetchMachines(currentProject.id),
+        fetchProducts(currentProject.id),
+        fetchMembers(currentProject.id),
+        fetchSubscription(currentProject.id),
+        loadRecentEvents(),
+        generateRecommendations()
+      ]);
+    };
+    fetchData();
+  }
+}, [currentProject?.id]);
+
+  
+if (!loading && projects.length === 0) {
+  console.warn("[Dashboard] ⚠️ Aucun projet trouvé, redirection vers /projects/new");
+  navigate('/projects/new', { replace: true }); if (!loading && projects.length === 0) {
+  console.warn("[Dashboard] ⚠️ Aucun projet trouvé, redirection vers /projects/new");
+  navigate('/projects/new', { replace: true });
+
+  return (
+    <div className="flex items-center justify-center min-h-screen">
+      <p className="text-lg text-gray-500">Redirection vers la création de projet...</p>
+    </div>
+  );
+}
+
+if (!loading && currentProject && !projects.some(p => p.id === currentProject.id)) {
+  console.warn("[Dashboard] ❌ Projet non autorisé, redirection vers /projects/new");
+  navigate('/projects/new', { replace: true });
+
+  return (
+    <div className="flex items-center justify-center min-h-screen">
+      <p className="text-lg text-gray-500">Redirection vers un projet valide...</p>
+    </div>
+  );
+}
+
+  return null; // ❌ Empêche l'affichage du Dashboard
+}
+
+if (!loading && currentProject && !projects.some(p => p.id === currentProject.id)) {
+  console.warn("[Dashboard] ❌ Projet non autorisé, redirection vers /projects/new");
+  navigate('/projects/new', { replace: true }); if (!loading && projects.length === 0) {
+  console.warn("[Dashboard] ⚠️ Aucun projet trouvé, redirection vers /projects/new");
+  navigate('/projects/new', { replace: true });
+
+  return (
+    <div className="flex items-center justify-center min-h-screen">
+      <p className="text-lg text-gray-500">Redirection vers la création de projet...</p>
+    </div>
+  );
+}
+
+if (!loading && currentProject && !projects.some(p => p.id === currentProject.id)) {
+  console.warn("[Dashboard] ❌ Projet non autorisé, redirection vers /projects/new");
+  navigate('/projects/new', { replace: true });
+
+  return (
+    <div className="flex items-center justify-center min-h-screen">
+      <p className="text-lg text-gray-500">Redirection vers un projet valide...</p>
+    </div>
+  );
+}
+
+  return null; // ❌ Empêche l'affichage du projet non autorisé
+}
+  
   const loadRecentEvents = async () => {
     if (!currentProject?.id) return;
 
