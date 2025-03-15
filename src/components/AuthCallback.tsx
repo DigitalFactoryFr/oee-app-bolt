@@ -1,73 +1,35 @@
-import React, { useEffect } from 'react';
+import { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { useAuthStore } from '../store/authStore';
-import { useProjectStore } from '../store/projectStore';
 
-const AuthCallback: React.FC = () => {
+const ForceNavigateOnAuth = () => {
   const navigate = useNavigate();
-  const { setUser, setError } = useAuthStore();
-  const { fetchProjects, projects } = useProjectStore();
+  const { setUser } = useAuthStore();
 
   useEffect(() => {
-    const finalizeAuth = async () => {
-      try {
-        console.log('[AuthCallback] Début du callback (flux implicite)');
-
-        // 1. Vérifier la session auprès de Supabase
-        const { data, error } = await supabase.auth.getSession();
-        console.log('[AuthCallback] Résultat getSession:', { data, error });
-        if (error) {
-          console.error('[AuthCallback] Erreur getSession:', error);
-          setError(error.message);
-          navigate('/auth');
-          return;
-        }
-
-        // 2. Si pas d’utilisateur, on renvoie vers /auth
-        if (!data.session?.user) {
-          console.error('[AuthCallback] Aucune session utilisateur trouvée');
-          setError('No session found');
-          navigate('/auth');
-          return;
-        }
-
-        // 3. On stocke l’utilisateur dans le store
-        console.log('[AuthCallback] Utilisateur connecté:', data.session.user);
+    // Écouter les changements d'état d'authentification
+    const { data: authListener } = supabase.auth.onAuthStateChange((event, session) => {
+      console.log('[ForceNavigateOnAuth] Événement d’auth :', event, session);
+      if (event === 'SIGNED_IN' && session?.user) {
+        // Mettre à jour l'utilisateur dans votre store
         setUser({
-          id: data.session.user.id,
-          email: data.session.user.email || '',
+          id: session.user.id,
+          email: session.user.email || '',
         });
-
-        // 4. Charger les projets de l’utilisateur
-        await fetchProjects();
-        console.log('[AuthCallback] Projets chargés:', projects);
-
-        // 5. Décider de la redirection finale
-        if (projects.length === 0) {
-          console.log('[AuthCallback] Aucun projet => vers /projects/new');
-          navigate('/projects/new');
-        } else {
-          console.log('[AuthCallback] Au moins un projet => vers /dashboard');
-          navigate('/dashboard');
-        }
-      } catch (err) {
-        console.error('[AuthCallback] Exception attrapée:', err);
-        setError('An error occurred during authentication');
-        navigate('/auth');
+        // Forcer la navigation vers le dashboard (ou /projects/new si nécessaire)
+        console.log('[ForceNavigateOnAuth] Utilisateur authentifié, redirection vers /dashboard');
+        navigate('/dashboard', { replace: true });
       }
+    });
+
+    // Nettoyer le listener à la fin
+    return () => {
+      authListener?.unsubscribe();
     };
+  }, [navigate, setUser]);
 
-    finalizeAuth();
-    // Important : ne mettez PAS `projects` dans le tableau de dépendances
-    // pour éviter un re-render infini si fetchProjects() modifie le store.
-  }, [navigate, setUser, setError, fetchProjects]);
-
-  return (
-    <div className="flex justify-center items-center h-screen">
-      <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
-    </div>
-  );
+  return null;
 };
 
-export default AuthCallback;
+export default ForceNavigateOnAuth;
