@@ -12,9 +12,9 @@ export default function AuthCallback() {
   useEffect(() => {
     const checkProjects = async () => {
       console.log("[AuthCallback] 🔄 Vérification des projets en cours...");
-      
+
       try {
-        await fetchProjects(); 
+        await fetchProjects(); // Charger les projets
         console.log("[AuthCallback] ✅ Projets récupérés :", projects);
 
         setTimeout(() => {
@@ -25,7 +25,7 @@ export default function AuthCallback() {
             console.log("[AuthCallback] 🆕 Aucun projet => Redirection vers /projects/new");
             navigate('/projects/new', { replace: true });
           }
-        }, 500); // Ajout d’un petit délai pour s'assurer que les projets sont chargés
+        }, 500);
       } catch (err) {
         console.error("[AuthCallback] ❌ Erreur lors de la récupération des projets:", err);
         setError('Erreur lors de la récupération des projets');
@@ -33,25 +33,20 @@ export default function AuthCallback() {
       }
     };
 
-    const { data: authListener } = supabase.auth.onAuthStateChange(
-      async (event, session) => {
-        console.log('[AuthCallback] onAuthStateChange =>', event, session);
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session?.user) {
+        console.log("[AuthCallback] 👤 Utilisateur détecté :", session.user);
+        setUser({
+          id: session.user.id,
+          email: session.user.email ?? '',
+        });
 
-        if (event === 'SIGNED_IN' && session?.user) {
-          setUser({
-            id: session.user.id,
-            email: session.user.email ?? '',
-          });
-          console.log("[AuthCallback] 👤 Utilisateur mis à jour :", session.user);
-          checkProjects();
-        }
+        checkProjects();
+      } else {
+        console.log("[AuthCallback] ❌ Aucun utilisateur trouvé, redirection vers /auth");
+        navigate('/auth', { replace: true });
       }
-    );
-
-    return () => {
-      console.log("[AuthCallback] 🛑 Désinscription du listener d'authentification");
-      authListener?.unsubscribe();
-    };
+    });
   }, [navigate, setUser, setError, fetchProjects, projects.length]);
 
   return (

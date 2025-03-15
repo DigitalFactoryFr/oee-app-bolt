@@ -26,9 +26,14 @@ const Sidebar: React.FC = () => {
   const { projects, currentProject, setCurrentProject } = useProjectStore();
   const [showProjectList, setShowProjectList] = useState(false);
 
-  useEffect(() => {
-    console.log("[Sidebar] 📌 Projet actuel :", currentProject);
-  }, [currentProject]);
+
+    useEffect(() => {
+    if (!currentProject && projects.length > 0) {
+      console.log("[Sidebar] 📌 Sélection automatique du premier projet :", projects[0]);
+      setCurrentProject(projects[0]);
+    }
+  }, [projects, currentProject, setCurrentProject]);
+
   
   // Helper function to check if a path matches the current location
   const isPathActive = (path: string) => {

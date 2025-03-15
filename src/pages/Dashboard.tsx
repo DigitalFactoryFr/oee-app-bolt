@@ -58,10 +58,8 @@ const Dashboard: React.FC = () => {
   const [recommendations, setRecommendations] = useState<Recommendation[]>([]);
   const [loading, setLoading] = useState(true);
 
-
-    
   useEffect(() => {
-  console.log("[Dashboard] 🚀 Chargement des projets...");
+    console.log("[Dashboard] 🚀 Chargement des projets...");
     fetchProjects();
   }, [fetchProjects]);
 
