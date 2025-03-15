@@ -3,6 +3,10 @@ import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { useAuthStore } from '../store/authStore';
 import { useProjectStore } from '../store/projectStore';
+import { useNavigate } from 'react-router-dom
+
+
+
 
 export default function AuthCallback() {
   const navigate = useNavigate();
