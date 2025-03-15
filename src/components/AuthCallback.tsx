@@ -15,21 +15,20 @@ const AuthCallback = () => {
     const handleAuthCallback = async () => {
       console.log('[AuthCallback] Début du callback');
 
-      // Afficher les variables d'environnement pour vérification
+      // Vérification des variables d'environnement
       console.log('[AuthCallback] Variables d\'environnement:', {
         supabaseUrl: import.meta.env.VITE_SUPABASE_URL,
         supabaseAnonKey: import.meta.env.VITE_SUPABASE_ANON_KEY,
       });
 
-      // Inspecter l'instance supabase et l'objet auth
+      // Inspection de l'instance supabase et de l'objet auth
       console.log('[AuthCallback] Instance supabase:', supabase);
       console.log('[AuthCallback] supabase.auth:', supabase.auth);
       console.log('[AuthCallback] getSessionFromUrl:', supabase.auth.getSessionFromUrl);
 
-      // Vérifier que la méthode getSessionFromUrl existe
       if (typeof supabase.auth.getSessionFromUrl !== 'function') {
         console.error('[AuthCallback] getSessionFromUrl n\'est pas défini.');
-        setError("La méthode getSessionFromUrl n'est pas disponible. Vérifiez votre version ou la configuration de @supabase/supabase-js.");
+        setError("La méthode getSessionFromUrl n'est pas disponible. Vérifiez votre configuration de @supabase/supabase-js.");
         navigate('/auth');
         return;
       }
