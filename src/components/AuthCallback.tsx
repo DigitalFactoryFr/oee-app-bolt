@@ -10,67 +10,74 @@ export default function AuthCallback() {
   const { fetchProjects, projects } = useProjectStore();
 
   useEffect(() => {
-    console.log("[AuthCallback] Composant monté 🚀");
+    console.log('[AuthCallback] 📌 Composant monté');
 
-    console.log("[DEBUG] navigate est :", navigate);
-    if (typeof navigate !== "function") {
-      console.error("[ERROR] ❌ useNavigate() ne retourne pas une fonction !");
-      return;
+    // Vérification des fonctions critiques
+    console.log("[DEBUG] Vérification de setUser:", setUser);
+    console.log("[DEBUG] Vérification de fetchProjects:", fetchProjects);
+
+    if (typeof setUser !== "function") {
+      console.error("[ERROR] ❌ setUser n'est pas une fonction !");
     }
 
-    const checkAuth = async () => {
-      console.log("[AuthCallback] Vérification de la session en cours...");
+    if (typeof fetchProjects !== "function") {
+      console.error("[ERROR] ❌ fetchProjects n'est pas une fonction !");
+    }
 
-      const { data: { session }, error } = await supabase.auth.getSession();
+    if (typeof navigate !== "function") {
+      console.error("[ERROR] ❌ navigate() n'est pas défini correctement !");
+    } else {
+      console.log("[AuthCallback] ✅ Navigation possible !");
+    }
 
-      if (error) {
-        console.error("[AuthCallback] Erreur récupération session ❌", error);
-        setError("Erreur lors de la récupération de la session.");
-        navigate('/auth', { replace: true });
-        return;
-      }
+    // Écouteur sur le changement d'état d'authentification
+    const { data: authListener } = supabase.auth.onAuthStateChange(
+      async (event, session) => {
+        console.log(`[AuthCallback] 🔄 Événement onAuthStateChange =>`, event, session);
 
-      if (session?.user) {
-        console.log("[AuthCallback] ✅ Utilisateur authentifié :", session.user);
-        setUser({
-          id: session.user.id,
-          email: session.user.email ?? '',
-        });
+        if (event === 'SIGNED_IN' && session?.user) {
+          try {
+            console.log("[AuthCallback] ✅ Utilisateur authentifié :", session.user);
 
-        try {
-          console.log("[AuthCallback] 📂 Chargement des projets...");
-          await fetchProjects();
+            // Mettre à jour l'utilisateur dans le store
+            setUser({
+              id: session.user.id,
+              email: session.user.email ?? '',
+            });
 
-          console.log("[AuthCallback] 🟢 Projets récupérés :", projects);
+            // Charger les projets
+            await fetchProjects();
 
-          // Ajout d'un setTimeout pour éviter un problème de timing
-          setTimeout(() => {
+            console.log("[DEBUG] Projects actuel :", projects);
+            console.log("[DEBUG] projects.length :", projects ? projects.length : "undefined");
+
+            // Vérifier la navigation en fonction des projets
             if (!projects || projects.length === 0) {
-              console.log("[AuthCallback] ➡ Aucun projet => Redirection /projects/new");
+              console.log('[AuthCallback] 🆕 Aucun projet => Redirection vers /projects/new');
               navigate('/projects/new', { replace: true });
             } else {
-              console.log("[AuthCallback] ✅ Projets trouvés => Redirection /dashboard");
+              console.log('[AuthCallback] 📂 Au moins un projet => Redirection vers /dashboard');
               navigate('/dashboard', { replace: true });
             }
-          }, 500);
-        } catch (err) {
-          console.error("[AuthCallback] ❌ Erreur lors du chargement des projets", err);
-          setError("Impossible de récupérer les projets.");
-          navigate('/auth', { replace: true });
+          } catch (err) {
+            console.error('[AuthCallback] ❌ Erreur:', err);
+            setError('Erreur lors de la récupération des projets');
+            navigate('/auth', { replace: true });
+          }
         }
-      } else {
-        console.warn("[AuthCallback] ❌ Aucun utilisateur connecté, redirection vers /auth");
-        navigate('/auth', { replace: true });
       }
-    };
+    );
 
-    checkAuth();
+    return () => {
+      console.log("[AuthCallback] 🛑 Désinscription du listener d'authentification");
+      authListener?.unsubscribe();
+    };
   }, [navigate, setUser, setError, fetchProjects]);
 
   return (
     <div className="flex flex-col justify-center items-center h-screen">
       <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
-      <p className="mt-4 text-gray-600">Connexion en cours...</p>
+      <p className="mt-2 text-gray-600">Connexion en cours...</p>
     </div>
   );
 }
