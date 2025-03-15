@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { useAuthStore } from '../store/authStore';
@@ -8,55 +8,51 @@ export default function AuthCallback() {
   const navigate = useNavigate();
   const { setUser, setError } = useAuthStore();
   const { fetchProjects, projects } = useProjectStore();
-  const [loading, setLoading] = useState(true); // Ajout d'un état de chargement
 
   useEffect(() => {
-    console.log("[AuthCallback] 🔄 Vérification de la session...");
-    
-    const checkAuth = async () => {
-      const { data: session, error } = await supabase.auth.getSession();
+    const checkProjects = async () => {
+      console.log("[AuthCallback] 🔄 Vérification des projets en cours...");
       
-      if (error || !session?.session) {
-        console.error("[AuthCallback] ❌ Aucune session trouvée, redirection vers /auth");
-        setError("Session invalide");
-        navigate("/auth", { replace: true });
-        return;
-      }
-
-      console.log("[AuthCallback] ✅ Utilisateur authentifié :", session.session.user);
-
-      setUser({
-        id: session.session.user.id,
-        email: session.session.user.email ?? "",
-      });
-
       try {
-        console.log("[AuthCallback] 🔄 Récupération des projets en cours...");
-        await fetchProjects(); // ⚡ On attend la fin du fetch
-        setLoading(false); // ⚡ On marque la fin du chargement
+        await fetchProjects(); 
+        console.log("[AuthCallback] ✅ Projets récupérés :", projects);
+
+        setTimeout(() => {
+          if (projects.length > 0) {
+            console.log("[AuthCallback] 📂 Redirection vers /dashboard");
+            navigate('/dashboard', { replace: true });
+          } else {
+            console.log("[AuthCallback] 🆕 Aucun projet => Redirection vers /projects/new");
+            navigate('/projects/new', { replace: true });
+          }
+        }, 500); // Ajout d’un petit délai pour s'assurer que les projets sont chargés
       } catch (err) {
         console.error("[AuthCallback] ❌ Erreur lors de la récupération des projets:", err);
-        setError("Erreur lors de la récupération des projets");
-        navigate("/auth", { replace: true });
+        setError('Erreur lors de la récupération des projets');
+        navigate('/auth', { replace: true });
       }
     };
 
-    checkAuth();
-  }, [navigate, setUser, setError, fetchProjects]);
+    const { data: authListener } = supabase.auth.onAuthStateChange(
+      async (event, session) => {
+        console.log('[AuthCallback] onAuthStateChange =>', event, session);
 
-  useEffect(() => {
-    if (!loading) {
-      console.log("[AuthCallback] 📂 Projets chargés :", projects);
-      
-      if (projects.length > 0) {
-        console.log("[AuthCallback] ✅ Redirection vers /dashboard");
-        navigate("/dashboard", { replace: true });
-      } else {
-        console.log("[AuthCallback] 🆕 Aucun projet, redirection vers /projects/new");
-        navigate("/projects/new", { replace: true });
+        if (event === 'SIGNED_IN' && session?.user) {
+          setUser({
+            id: session.user.id,
+            email: session.user.email ?? '',
+          });
+          console.log("[AuthCallback] 👤 Utilisateur mis à jour :", session.user);
+          checkProjects();
+        }
       }
-    }
-  }, [projects, loading, navigate]);
+    );
+
+    return () => {
+      console.log("[AuthCallback] 🛑 Désinscription du listener d'authentification");
+      authListener?.unsubscribe();
+    };
+  }, [navigate, setUser, setError, fetchProjects, projects.length]);
 
   return (
     <div className="flex flex-col justify-center items-center h-screen">

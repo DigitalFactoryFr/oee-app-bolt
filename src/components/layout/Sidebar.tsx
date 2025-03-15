@@ -26,6 +26,10 @@ const Sidebar: React.FC = () => {
   const { projects, currentProject, setCurrentProject } = useProjectStore();
   const [showProjectList, setShowProjectList] = useState(false);
 
+  useEffect(() => {
+    console.log("[Sidebar] 📌 Projet actuel :", currentProject);
+  }, [currentProject]);
+  
   // Helper function to check if a path matches the current location
   const isPathActive = (path: string) => {
     return location.pathname.includes(path);
