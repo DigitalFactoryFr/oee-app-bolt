@@ -3,7 +3,7 @@ BEGIN;
 
 -- Drop and recreate team_roles table with proper structure
 DROP TABLE IF EXISTS team_roles CASCADE;
-
+ 
 CREATE TABLE team_roles (
   id text PRIMARY KEY,
   name text NOT NULL,

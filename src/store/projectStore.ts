@@ -98,19 +98,7 @@ export const useProjectStore = create<ProjectState>((set) => ({
       
       if (projectError) throw projectError;
 
-      // Create owner team member
-      const { error: teamError } = await supabase
-        .from('team_members')
-        .insert({
-          project_id: project.id,
-          email: user.email,
-          role: 'owner',
-          status: 'active',
-          team_name: 'Owners',
-          working_time_minutes: 480
-        });
-      
-      if (teamError) throw teamError;
+
       
       set((state) => ({ 
         projects: [project as Project, ...state.projects],

@@ -33,24 +33,26 @@ export const useSubscriptionStore = create<SubscriptionState>((set) => ({
   loading: false,
   error: null,
 
-  fetchSubscription: async (projectId) => {
-    try {
-      set({ loading: true, error: null });
+fetchSubscription: async (projectId) => {
+  try {
+    set({ loading: true, error: null });
 
-      const { data, error } = await supabase
-        .from('subscriptions')
-        .select('*')
-        .eq('project_id', projectId)
-        .single();
+    const { data, error } = await supabase
+      .from('subscriptions')
+      .select('*')
+      .eq('project_id', projectId);
+    
+    console.log('Subscriptions returned:', data);
+    console.log('Error:', error);
 
-      if (error) throw error;
-
-      set({ subscription: data as Subscription, loading: false });
-    } catch (error) {
-      console.error('Error fetching subscription:', error);
-      set({ error: (error as Error).message, loading: false });
-    }
-  },
+    // Si data est un tableau avec 0 ou plusieurs éléments, c'est la source du problème.
+    set({ subscription: data && data.length === 1 ? data[0] : null, loading: false });
+  } catch (error) {
+    console.error('Error fetching subscription:', error);
+    set({ error: (error as Error).message, loading: false });
+  }
+}
+,
 
   startCheckout: async (machineCount) => {
     try {
