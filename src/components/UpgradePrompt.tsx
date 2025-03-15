@@ -1,23 +1,27 @@
-import React from "react";
+import React, { useState } from "react";
 import { ArrowRight } from "lucide-react";
 import { useSubscriptionStore } from '../store/subscriptionStore';
 import { loadStripe } from '@stripe/stripe-js';
 
-const stripePromise = loadStripe("pk_live_51R1mHfG3UtTNBuRxHWDBd3y73w3NmrCyrclE4nyNzMuj9KCkAkX7GzdFnpAD2m7NJ6XMSY1TDajYohs07UKOVifw00ZbomCm91");
+const stripePromise = loadStripe("pk_live_51R1mHfG3UtTNBuRxHWDBd3y73...");
 
 interface UpgradePromptProps {
-  machineCount: number;
+  // machineCount: number; // <- vous pouvez l'enlever si on gère tout localement
   className?: string;
 }
 
-const UpgradePrompt: React.FC<UpgradePromptProps> = ({ machineCount, className = '' }) => {
+const UpgradePrompt: React.FC<UpgradePromptProps> = ({ className = '' }) => {
   const { subscription, startCheckout } = useSubscriptionStore();
+
+  // ►►► Ajout d'un state local pour le nombre de machines payantes désirées
+  const [desiredMachineCount, setDesiredMachineCount] = useState(5);
 
   if (!subscription || subscription.status !== 'free') return null;
 
   const handleUpgrade = async () => {
     try {
-      const sessionId = await startCheckout(machineCount);
+      // ►►► On passe desiredMachineCount à la fonction startCheckout
+      const sessionId = await startCheckout(desiredMachineCount);
       const stripe = await stripePromise;
       if (stripe) {
         await stripe.redirectToCheckout({ sessionId });
@@ -33,26 +37,22 @@ const UpgradePrompt: React.FC<UpgradePromptProps> = ({ machineCount, className =
       <p className="mb-4">
         Get unlimited machines and advanced features for only €39/machine/month
       </p>
-      <div className="space-y-3 mb-6">
-        <div className="flex items-center">
-          <div className="h-5 w-5 rounded-full bg-blue-400 flex items-center justify-center mr-2">
-            <span className="text-sm">✓</span>
-          </div>
-          <span>Unlimited production lines</span>
-        </div>
-        <div className="flex items-center">
-          <div className="h-5 w-5 rounded-full bg-blue-400 flex items-center justify-center mr-2">
-            <span className="text-sm">✓</span>
-          </div>
-          <span>Advanced analytics and reporting</span>
-        </div>
-        <div className="flex items-center">
-          <div className="h-5 w-5 rounded-full bg-blue-400 flex items-center justify-center mr-2">
-            <span className="text-sm">✓</span>
-          </div>
-          <span>Priority support</span>
-        </div>
+
+      {/* ►►► Nouveau champ pour laisser l'utilisateur choisir son nombre de machines */}
+      <div className="mb-4">
+        <label htmlFor="machineCount" className="block text-sm font-medium">
+          Number of machines you want to pay for
+        </label>
+        <input
+          id="machineCount"
+          type="number"
+          min={1}
+          value={desiredMachineCount}
+          onChange={(e) => setDesiredMachineCount(Number(e.target.value))}
+          className="mt-1 block w-24 rounded-md border-gray-300 shadow-sm focus:ring-blue-500 focus:border-blue-500 text-gray-900"
+        />
       </div>
+
       <button
         onClick={handleUpgrade}
         className="w-full bg-white text-blue-600 hover:bg-blue-50 font-medium py-2 px-4 rounded-md inline-flex items-center justify-center"
