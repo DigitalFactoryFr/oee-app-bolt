@@ -13,42 +13,47 @@ const AuthCallback = () => {
 
   useEffect(() => {
     const handleAuthCallback = async () => {
+      console.log('[AuthCallback] Début du callback');
       try {
-       const { data, error } = await supabase.auth.getSessionFromUrl({ storeSession: true });
+        console.log('[AuthCallback] Appel de getSessionFromUrl avec storeSession: true');
+        const { data, error } = await supabase.auth.getSessionFromUrl({ storeSession: true });
+        console.log('[AuthCallback] Réponse de getSessionFromUrl:', { data, error });
 
         if (error) {
+          console.error('[AuthCallback] Erreur lors de l\'échange du token:', error);
           setError(error.message);
           navigate('/auth');
           return;
         }
 
-        if (session?.user) {
+        if (data?.session?.user) {
+          console.log('[AuthCallback] Utilisateur récupéré:', data.session.user);
           setUser({
-            id: session.user.id,
-            email: session.user.email || '',
+            id: data.session.user.id,
+            email: data.session.user.email || '',
           });
 
-          // Fetch projects to check if user has any
+          console.log('[AuthCallback] Appel de fetchProjects()');
           await fetchProjects();
+          console.log('[AuthCallback] Valeur de projects après fetchProjects:', projects);
 
-          // If returnTo is set, navigate there
           if (returnTo) {
+            console.log('[AuthCallback] Redirection vers returnTo:', returnTo.replace('#', ''));
             navigate(returnTo.replace('#', ''));
-          }
-          // If no projects, go to new project page
-          else if (!projects.length) {
+          } else if (!projects.length) {
+            console.log('[AuthCallback] Aucun projet trouvé, redirection vers /projects/new');
             navigate('/projects/new');
-          }
-          // Otherwise go to dashboard
-          else {
+          } else {
+            console.log('[AuthCallback] Projet(s) trouvé(s), redirection vers /dashboard');
             navigate('/dashboard');
           }
         } else {
+          console.error('[AuthCallback] Aucune session utilisateur trouvée dans data');
           setError('Unable to retrieve user session.');
           navigate('/auth');
         }
-      } catch (error) {
-        console.error('Auth callback error:', error);
+      } catch (err) {
+        console.error('[AuthCallback] Exception attrapée:', err);
         setError('An error occurred during authentication');
         navigate('/auth');
       }
