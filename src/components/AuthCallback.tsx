@@ -55,7 +55,7 @@ const AuthCallback = () => {
     };
 
     handleAuthCallback();
-  }, [navigate, setUser, setError, returnTo, projects, fetchProjects]);
+  }, [navigate, setUser, setError, returnTo, fetchProjects]);
 
   return (
     <div className="flex justify-center items-center h-screen">
