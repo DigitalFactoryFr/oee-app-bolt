@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
 import { 
   LayoutDashboard,
@@ -27,7 +27,7 @@ const Sidebar: React.FC = () => {
   const [showProjectList, setShowProjectList] = useState(false);
 
 
-    useEffect(() => {
+  useEffect(() => {
     if (!currentProject && projects.length > 0) {
       console.log("[Sidebar] 📌 Sélection automatique du premier projet :", projects[0]);
       setCurrentProject(projects[0]);
