@@ -14,8 +14,19 @@ const AuthCallback = () => {
   useEffect(() => {
     const handleAuthCallback = async () => {
       console.log('[AuthCallback] Début du callback');
+
+      // Vérification des variables d'environnement
+      console.log('[AuthCallback] Variables d\'environnement:', {
+        supabaseUrl: import.meta.env.VITE_SUPABASE_URL,
+        supabaseAnonKey: import.meta.env.VITE_SUPABASE_ANON_KEY,
+      });
+
+      // Inspection de l'instance Supabase et de l'objet auth
+      console.log('[AuthCallback] Instance supabase:', supabase);
+      console.log('[AuthCallback] supabase.auth:', supabase.auth);
+      console.log('[AuthCallback] getSessionFromUrl:', supabase.auth.getSessionFromUrl);
+
       try {
-        console.log('[AuthCallback] supabase.auth:', supabase.auth);
         console.log('[AuthCallback] Appel de getSessionFromUrl avec storeSession: true');
         const { data, error } = await supabase.auth.getSessionFromUrl({ storeSession: true });
         console.log('[AuthCallback] Réponse de getSessionFromUrl:', { data, error });
@@ -39,9 +50,10 @@ const AuthCallback = () => {
           console.log('[AuthCallback] Valeur de projects après fetchProjects:', projects);
 
           if (returnTo) {
-            console.log('[AuthCallback] Redirection vers returnTo:', returnTo.replace('#', ''));
-            navigate(returnTo.replace('#', ''));
-          } else if (!projects.length) {
+            const redirectUrl = returnTo.replace('#', '');
+            console.log('[AuthCallback] Redirection vers returnTo:', redirectUrl);
+            navigate(redirectUrl);
+          } else if (!projects || !projects.length) {
             console.log('[AuthCallback] Aucun projet trouvé, redirection vers /projects/new');
             navigate('/projects/new');
           } else {
