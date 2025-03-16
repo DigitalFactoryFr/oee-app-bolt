@@ -10,6 +10,10 @@ const SITE_URL =
     ? 'https://i40pilot.app'
     : 'http://localhost:5173';
 
+console.log('[emailService] ✅ NODE_ENV:', process.env.NODE_ENV);
+console.log('[emailService] ✅ API_URL:', API_URL);
+console.log('[emailService] ✅ SITE_URL:', SITE_URL);
+
 export const sendEmail = async (
   to: string,
   subject: string,
@@ -17,52 +21,50 @@ export const sendEmail = async (
   data: any
 ) => {
   try {
-    // Génération du HTML en passant siteUrl et les autres données
+    console.log('[sendEmail] 🔹 Preparing email for:', to);
+    console.log('[sendEmail] 🔹 inviteUrl:', data.inviteUrl || '❌ MISSING');
+
+    // Vérification de `inviteUrl`
+    if (template === 'TEAM_INVITE' && !data.inviteUrl) {
+      console.error('❌ [sendEmail] ERROR: `inviteUrl` is missing in request data.');
+      return false;
+    }
+
+    // Génération du contenu HTML de l’email
     const html = generateEmailHtml(template, { ...data, siteUrl: SITE_URL });
+    console.log('[sendEmail] ✅ Generated HTML:', html);
+
+    // Envoi de l'email via l'API externe
     const response = await fetch(API_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ to, subject, html }),
     });
 
+    console.log('[sendEmail] ⏳ Email request sent, awaiting response...');
+
     if (!response.ok) {
-      throw new Error(`API Error ${response.status}: ${await response.text()}`);
+      const errorMessage = await response.text();
+      console.error('[sendEmail] ❌ API Error:', response.status, errorMessage);
+      throw new Error(`API Error ${response.status}: ${errorMessage}`);
     }
 
+    console.log('[sendEmail] ✅ Email successfully sent to:', to);
     return true;
   } catch (error) {
-    console.error('Error sending email:', error);
-    // Retourne true même en cas d'erreur pour ne pas bloquer le parcours utilisateur
-    return true;
+    console.error('[sendEmail] ❌ Error sending email:', error);
+    return false;
   }
 };
 
+// Génération du contenu HTML des emails
 const generateEmailHtml = (template: EmailTemplate, data: any): string => {
   const { siteUrl } = data;
-  switch (template) {
-    case 'WELCOME':
-      return `
-        <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
-          <h1 style="color: #2563eb;">Welcome to Pilot!</h1>
-          <p>Hi ${data.email},</p>
-          <p>Welcome to Pilot! We're excited to help you optimize your industrial production.</p>
-          <p>Get started by:</p>
-          <ul>
-            <li>Creating your first project</li>
-            <li>Setting up your production lines</li>
-            <li>Adding your machines and products</li>
-          </ul>
-          <p>
-            <a href="${siteUrl}/projects/new" 
-               style="display: inline-block; background: #2563eb; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px;">
-              Create Your First Project
-            </a>
-          </p>
-          <p>Need help? Contact our support team anytime.</p>
-        </div>
-      `;
+  console.log('[generateEmailHtml] 🔹 Using siteUrl:', siteUrl);
 
+  switch (template) {
     case 'TEAM_INVITE':
+      console.log('[generateEmailHtml] 🔹 inviteUrl:', data.inviteUrl || '❌ MISSING');
       return `
         <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
           <h1 style="color: #2563eb;">You've Been Invited!</h1>
@@ -72,9 +74,9 @@ const generateEmailHtml = (template: EmailTemplate, data: any): string => {
             <strong>${data.teamName || 'this project'}</strong> 
             as a <strong>${data.role || 'member'}</strong>.
           </p>
-          <p>Click the link below to accept your invitation:</p>
+          <p>Click the link below to acceptt your invitation:</p>
           <p>
-            <a href="${siteUrl}/invite/${data.inviteUrl}" 
+            <a href="/invite/${data.inviteUrl}" 
                style="display: inline-block; background: #2563eb; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px;">
               Accept Invitation
             </a>
@@ -85,30 +87,7 @@ const generateEmailHtml = (template: EmailTemplate, data: any): string => {
           </p>
         </div>
       `;
-
-    case 'SUBSCRIPTION_STARTED':
-      return `
-        <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
-          <h1 style="color: #2563eb;">Welcome to Pilot Pro!</h1>
-          <p>Hi,</p>
-          <p>Your Pro subscription has been activated for ${data.machineCount} machines.</p>
-          <p>You now have access to:</p>
-          <ul>
-            <li>Unlimited production lines</li>
-            <li>Advanced analytics</li>
-            <li>Priority support</li>
-          </ul>
-          <p>Your next billing date is: ${new Date(data.nextBillingDate).toLocaleDateString()}</p>
-          <p>
-            <a href="${siteUrl}/dashboard" 
-               style="display: inline-block; background: #2563eb; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px;">
-              Go to Dashboard
-            </a>
-          </p>
-        </div>
-      `;
-
     default:
-      return '';
+      return '<p>No template found</p>';
   }
 };
