@@ -8,10 +8,16 @@ const SITE_URL = process.env.NODE_ENV === 'production'
   ? 'https://i40pilot.app'
   : 'http://localhost:5173';
 
-export const sendEmail = async (to: string, subject: string, template: EmailTemplate, data: any) => {
+export const sendEmail = async (
+  to: string,
+  subject: string,
+  template: EmailTemplate,
+  data: any
+) => {
   try {
+    // On génère le HTML en passant siteUrl + data supplémentaire
     const html = generateEmailHtml(template, { ...data, siteUrl: SITE_URL });
-    
+
     const response = await fetch(API_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -25,8 +31,8 @@ export const sendEmail = async (to: string, subject: string, template: EmailTemp
     return true;
   } catch (error) {
     console.error('Error sending email:', error);
-    // Return true even if email fails to avoid blocking user flow
-    // The email service will retry sending failed emails
+    // On retourne true pour ne pas bloquer le user flow, 
+    // même si l’envoi d’email a échoué.
     return true;
   }
 };
@@ -48,7 +54,9 @@ const generateEmailHtml = (template: EmailTemplate, data: any): string => {
             <li>Adding your machines and products</li>
           </ul>
           <p>
-            <a href="${siteUrl}/projects/new" style="display: inline-block; background: #2563eb; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px;">
+            <a href="${siteUrl}/projects/new" 
+               style="display: inline-block; background: #2563eb; color: white; 
+                      padding: 12px 24px; text-decoration: none; border-radius: 6px;">
               Create Your First Project
             </a>
           </p>
@@ -57,16 +65,31 @@ const generateEmailHtml = (template: EmailTemplate, data: any): string => {
       `;
 
     case 'TEAM_INVITE':
+      /**
+       * data.teamName => nom de l’équipe (ou du projet)
+       * data.role => rôle assigné
+       * data.inviteUrl => identifiant pour accepter l’invitation
+       */
       return `
         <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
           <h1 style="color: #2563eb;">You've Been Invited!</h1>
-          <p>Hi,</p>
-          <p>You've been invited to join the team as a ${data.role}.</p>
+          <p>Hi ${data.email || ''},</p>
+          <p>
+            You've been invited to join 
+            <strong>${data.teamName || 'this project'}</strong> 
+            as a <strong>${data.role || 'member'}</strong>.
+          </p>
           <p>Click the link below to accept your invitation:</p>
           <p>
-            <a href="${siteUrl}/invite/${data.inviteUrl}" style="display: inline-block; background: #2563eb; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px;">
+            <a href="${siteUrl}/invite/${data.inviteUrl}" 
+               style="display: inline-block; background: #2563eb; color: white; 
+                      padding: 12px 24px; text-decoration: none; border-radius: 6px;">
               Accept Invitation
             </a>
+          </p>
+          <p>If the button doesn't work, copy and paste this URL in your browser:</p>
+          <p style="word-break: break-all; color: #555;">
+            ${siteUrl}/invite/${data.inviteUrl}
           </p>
         </div>
       `;
@@ -83,9 +106,13 @@ const generateEmailHtml = (template: EmailTemplate, data: any): string => {
             <li>Advanced analytics</li>
             <li>Priority support</li>
           </ul>
-          <p>Your next billing date is: ${new Date(data.nextBillingDate).toLocaleDateString()}</p>
+          <p>Your next billing date is: 
+            ${new Date(data.nextBillingDate).toLocaleDateString()}
+          </p>
           <p>
-            <a href="${siteUrl}/dashboard" style="display: inline-block; background: #2563eb; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px;">
+            <a href="${siteUrl}/dashboard" 
+               style="display: inline-block; background: #2563eb; color: white; 
+                      padding: 12px 24px; text-decoration: none; border-radius: 6px;">
               Go to Dashboard
             </a>
           </p>
