@@ -1,27 +1,48 @@
+// src/store/productStore.ts
 import { create } from 'zustand';
 import { supabase } from '../lib/supabase';
 import type { Product, ProductExcelData } from '../types';
 
-interface ImportResult {
-  success: boolean;
-  duplicates: Array<{
-    name: string;
-    existing: Product;
-    new: Partial<Product>;
-  }>;
+interface DuplicatesResult {
+  name: string;
+  existing: Product;
+  new: Partial<Product>;
+}
+
+interface CheckResult {
+  newInserts: ProductExcelData[]; 
+  duplicates: DuplicatesResult[];
+  errors: Array<{ row: number; message: string }>;
+}
+
+interface ConfirmResult {
   created: Product[];
+  updated: Product[];
 }
 
 interface ProductState {
   products: Product[];
   loading: boolean;
   error: string | null;
+
   fetchProducts: (projectId: string) => Promise<Product[]>;
-  createProduct: (projectId: string, machineId: string, data: Partial<Product>) => Promise<Product | null>;
+  createProduct: (
+    projectId: string,
+    machineId: string,
+    data: Partial<Product>
+  ) => Promise<Product | null>;
   updateProduct: (id: string, data: Partial<Product>) => Promise<void>;
   deleteProduct: (id: string) => Promise<void>;
-  bulkCreateProducts: (projectId: string, products: ProductExcelData[]) => Promise<ImportResult>;
-  bulkUpdateProducts: (updates: Array<{ id: string } & Partial<Product>>) => Promise<void>;
+
+  // Nouveau flux : check + confirm
+  bulkCheckProducts: (
+    projectId: string,
+    productsExcel: ProductExcelData[]
+  ) => Promise<CheckResult>;
+  bulkConfirmImport: (
+    projectId: string,
+    checkResult: CheckResult
+  ) => Promise<ConfirmResult>;
 }
 
 export const useProductStore = create<ProductState>((set, get) => ({
@@ -29,236 +50,276 @@ export const useProductStore = create<ProductState>((set, get) => ({
   loading: false,
   error: null,
 
-  fetchProducts: async (projectId) => {
+  // ----------------------
+  // Méthodes de base
+  // ----------------------
+  async fetchProducts(projectId) {
     try {
       set({ loading: true, error: null });
       const { data, error } = await supabase
         .from('products')
         .select('*')
-        .eq('project_id', projectId)
-        .order('created_at', { ascending: true });
-
+        .eq('project_id', projectId);
       if (error) throw error;
-
-      const products = data as Product[];
-      set({ products, loading: false });
-      return products;
-    } catch (error) {
-      console.error('Error fetching products:', error);
-      set({ error: (error as Error).message, loading: false });
+      set({ products: data as Product[], loading: false });
+      return data as Product[];
+    } catch (err) {
+      console.error('Error fetching products:', err);
+      set({ error: (err as Error).message, loading: false });
       return [];
     }
   },
 
-  createProduct: async (projectId, machineId, productData) => {
+  async createProduct(projectId, machineId, productData) {
     try {
       set({ loading: true, error: null });
-
       const { data, error } = await supabase
         .from('products')
-        .insert([{
-          project_id: projectId,
-          machine_id: machineId,
-          status: 'in_progress',
-          ...productData
-        }])
+        .insert([
+          {
+            project_id: projectId,
+            machine_id: machineId,
+            status: 'in_progress',
+            ...productData,
+          },
+        ])
         .select()
         .single();
-
       if (error) throw error;
-
       const newProduct = data as Product;
       set((state) => ({
         products: [...state.products, newProduct],
-        loading: false
+        loading: false,
       }));
-
       return newProduct;
-    } catch (error) {
-      console.error('Error creating product:', error);
-      set({ error: (error as Error).message, loading: false });
+    } catch (err) {
+      console.error('Error creating product:', err);
+      set({ error: (err as Error).message, loading: false });
       return null;
     }
   },
 
-  updateProduct: async (id, productData) => {
+  async updateProduct(id, productData) {
     try {
       set({ loading: true, error: null });
-
       const { error } = await supabase
         .from('products')
         .update(productData)
         .eq('id', id);
-
       if (error) throw error;
-
       set((state) => ({
-        products: state.products.map(product =>
-          product.id === id ? { ...product, ...productData } : product
+        products: state.products.map((p) =>
+          p.id === id ? { ...p, ...productData } : p
         ),
-        loading: false
+        loading: false,
       }));
-    } catch (error) {
-      console.error('Error updating product:', error);
-      set({ error: (error as Error).message, loading: false });
-      throw error;
+    } catch (err) {
+      console.error('Error updating product:', err);
+      set({ error: (err as Error).message, loading: false });
+      throw err;
     }
   },
 
-  deleteProduct: async (id) => {
+  async deleteProduct(id) {
     try {
       set({ loading: true, error: null });
-
       const { error } = await supabase
         .from('products')
         .delete()
         .eq('id', id);
-
       if (error) throw error;
-
       set((state) => ({
-        products: state.products.filter(product => product.id !== id),
-        loading: false
+        products: state.products.filter((p) => p.id !== id),
+        loading: false,
       }));
-    } catch (error) {
-      console.error('Error deleting product:', error);
-      set({ error: (error as Error).message, loading: false });
-      throw error;
+    } catch (err) {
+      console.error('Error deleting product:', err);
+      set({ error: (err as Error).message, loading: false });
+      throw err;
     }
   },
 
-  bulkCreateProducts: async (projectId, products) => {
+  // ----------------------
+  // DRY RUN + CONFIRM
+  // ----------------------
+  async bulkCheckProducts(projectId, productsExcel) {
+    if (!projectId) {
+      throw new Error('projectId is undefined');
+    }
     try {
       set({ loading: true, error: null });
-      console.log("🚀 Starting bulk product creation...");
 
-      // 1. Récupérer toutes les machines
-      const { data: machines, error: machinesError } = await supabase
+      // 1) Récupérer machines
+      const { data: machinesData, error: machinesError } = await supabase
         .from('machines')
         .select('id, name')
         .eq('project_id', projectId);
-
       if (machinesError) throw machinesError;
+      if (!machinesData) throw new Error('No machines found');
 
-      if (!machines || machines.length === 0) {
-        throw new Error('No machines found for this project');
-      }
-
-      // 2. Récupérer tous les produits existants
-      const { data: existingProducts, error: productsError } = await supabase
+      // 2) Récupérer produits existants
+      const { data: existingProducts, error: existingError } = await supabase
         .from('products')
         .select('*')
         .eq('project_id', projectId);
+      if (existingError) throw existingError;
 
-      if (productsError) throw productsError;
+      // 3) Maps
+      const machinesMap = new Map<string, string>();
+      machinesData.forEach((m) => {
+        machinesMap.set(m.name.trim().toLowerCase(), m.id);
+      });
 
-      // 3. Créer les maps pour la recherche rapide
-      const machinesByName = new Map(machines.map(machine => [machine.name.toLowerCase(), machine]));
-      const existingProductsByName = new Map();
-      
-      existingProducts?.forEach(product => {
-        const machine = machines.find(m => m.id === product.machine_id);
+      const existingMap = new Map<string, Product>();
+      existingProducts.forEach((prod) => {
+        const machine = machinesData.find((m) => m.id === prod.machine_id);
         if (machine) {
-          const key = `${machine.name.toLowerCase()}-${product.name.toLowerCase()}`;
-          existingProductsByName.set(key, product);
+          const key = `${machine.name.toLowerCase()}-${prod.name.toLowerCase()}`;
+          existingMap.set(key, prod);
         }
       });
 
-      // 4. Préparer les résultats
-      const duplicates: Array<{
-        name: string;
-        existing: Product;
-        new: Partial<Product>;
-      }> = [];
-      const created: Product[] = [];
+      const newInserts: ProductExcelData[] = [];
+      const duplicates: DuplicatesResult[] = [];
+      const errors: Array<{ row: number; message: string }> = [];
 
-      // 5. Traiter chaque produit
-      for (const product of products) {
-        const machine = machinesByName.get(product.machine_name.toLowerCase());
-        
-        if (!machine) {
-          throw new Error(`Machine "${product.machine_name}" not found`);
+      // 4) Parcourir le fichier
+      for (let i = 0; i < productsExcel.length; i++) {
+        const rowIndex = i + 2;
+        const item = productsExcel[i];
+        if (!item.name) {
+          errors.push({ row: rowIndex, message: 'Product name is required' });
+          continue;
+        }
+        if (!item.machine_name) {
+          errors.push({
+            row: rowIndex,
+            message: `Machine name is required for product ${item.name}`,
+          });
+          continue;
         }
 
-        const key = `${product.machine_name.toLowerCase()}-${product.name.toLowerCase()}`;
-        const existingProduct = existingProductsByName.get(key);
+        const machineId = machinesMap.get(item.machine_name.trim().toLowerCase());
+        if (!machineId) {
+          errors.push({
+            row: rowIndex,
+            message: `Machine "${item.machine_name}" not found`,
+          });
+          continue;
+        }
 
-        if (existingProduct) {
+        const key = `${item.machine_name.toLowerCase()}-${item.name.toLowerCase()}`;
+        if (existingMap.has(key)) {
+          // => Doublon
           duplicates.push({
-            name: product.name,
-            existing: existingProduct,
+            name: item.name,
+            existing: existingMap.get(key)!,
             new: {
-              name: product.name,
-              product_id: product.product_id,
-              description: product.description,
-              cycle_time: product.cycle_time,
-            }
+              name: item.name,
+              product_id: item.product_id,
+              description: item.description,
+              cycle_time: item.cycle_time,
+            },
           });
         } else {
-          const { data, error } = await supabase
-            .from('products')
-            .insert([{
-              project_id: projectId,
-              machine_id: machine.id,
-              name: product.name,
-              product_id: product.product_id,
-              description: product.description,
-              cycle_time: product.cycle_time,
-              status: 'in_progress'
-            }])
-            .select()
-            .single();
-
-          if (error) throw error;
-          if (data) created.push(data as Product);
+          newInserts.push(item);
         }
       }
 
-      // 6. Mettre à jour l'état local
-      if (created.length > 0) {
-        set((state) => ({
-          products: [...state.products, ...created],
-          loading: false
-        }));
-      }
-
-      return {
-        success: true,
-        duplicates,
-        created
-      };
-
-    } catch (error) {
-      console.error('Error in bulkCreateProducts:', error);
-      set({ error: (error as Error).message, loading: false });
-      throw error;
+      set({ loading: false });
+      return { newInserts, duplicates, errors };
+    } catch (err) {
+      console.error('Error in bulkCheckProducts:', err);
+      set({ error: (err as Error).message, loading: false });
+      return { newInserts: [], duplicates: [], errors: [] };
     }
   },
 
-  bulkUpdateProducts: async (updates) => {
+  async bulkConfirmImport(projectId, checkResult) {
+    if (!projectId) {
+      throw new Error('projectId is undefined');
+    }
     try {
       set({ loading: true, error: null });
 
-      for (const update of updates) {
-        const { error } = await supabase
-          .from('products')
-          .update(update)
-          .eq('id', update.id);
+      const { newInserts, duplicates } = checkResult;
+      const created: Product[] = [];
+      const updated: Product[] = [];
 
-        if (error) throw error;
+      // A) Insérer newInserts
+      for (const item of newInserts) {
+        // Retrouver machine
+        const { data: foundMachine } = await supabase
+          .from('machines')
+          .select('id, name')
+          .eq('project_id', projectId)
+          .ilike('name', item.machine_name.trim()) // iLike => case-insensitive
+          .single();
+
+        if (!foundMachine) {
+          console.warn(
+            `Machine "${item.machine_name}" not found for product ${item.name}`
+          );
+          continue;
+        }
+
+        const { data, error } = await supabase
+          .from('products')
+          .insert([
+            {
+              project_id: projectId,
+              machine_id: foundMachine.id,
+              name: item.name,
+              product_id: item.product_id,
+              description: item.description,
+              cycle_time: item.cycle_time,
+              status: 'in_progress',
+            },
+          ])
+          .select()
+          .single();
+        if (error) {
+          console.error('Insert error for new product:', error);
+          continue;
+        }
+        created.push(data as Product);
       }
 
-      set((state) => ({
-        products: state.products.map(existingProduct => {
-          const update = updates.find(u => u.id === existingProduct.id);
-          return update ? { ...existingProduct, ...update } : existingProduct;
-        }),
-        loading: false
-      }));
-    } catch (error) {
-      console.error('Error bulk updating products:', error);
-      set({ error: (error as Error).message, loading: false });
-      throw error;
+      // B) Mettre à jour duplicates
+      for (const dup of duplicates) {
+        const { id } = dup.existing;
+        const updateData: Partial<Product> = {
+          name: dup.new.name,
+          product_id: dup.new.product_id,
+          description: dup.new.description,
+          cycle_time: dup.new.cycle_time,
+        };
+        const { error } = await supabase
+          .from('products')
+          .update(updateData)
+          .eq('id', id);
+        if (error) {
+          console.error('Update error for existing product:', error);
+          continue;
+        }
+        updated.push({ ...dup.existing, ...updateData });
+      }
+
+      // Re-fetch final
+      const { data: finalData } = await supabase
+        .from('products')
+        .select('*')
+        .eq('project_id', projectId);
+      if (finalData) {
+        set({ products: finalData as Product[] });
+      }
+
+      set({ loading: false });
+      return { created, updated };
+    } catch (err) {
+      console.error('Error in bulkConfirmImport:', err);
+      set({ error: (err as Error).message, loading: false });
+      return { created: [], updated: [] };
     }
-  }
+  },
 }));

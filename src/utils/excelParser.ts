@@ -471,20 +471,35 @@ export const parseTeamExcel = async (file: File): Promise<TeamExcelData[]> => {
   });
 };
 
-
-
 export const generateTeamTemplate = () => {
   const template = [
     {
-      email: 'operator1@example.com',
+      email: 'operator1@i40pilot.app',
       role: 'operator',
       team_name: 'Team A',
       machine_name: 'Machine 1',
       line_name: '',
       working_time_minutes: 480
     },
+      {
+      email: 'operator2@i40pilot.app',
+      role: 'operator',
+      team_name: 'Team B',
+      machine_name: 'Machine 1',
+      line_name: '',
+      working_time_minutes: 480
+    },
+      {
+      email: 'operator3@i40pilot.app',
+      role: 'operator',
+      team_name: 'Team A',
+      machine_name: 'Machine 3',
+      line_name: '',
+      working_time_minutes: 480
+    },
+    
     {
-      email: 'manager1@example.com',
+      email: 'manager1@i40pilot.app',
       role: 'team_manager',
       team_name: 'Team B',
       machine_name: '',
@@ -492,7 +507,7 @@ export const generateTeamTemplate = () => {
       working_time_minutes: 480
     },
     {
-      email: 'quality1@example.com',
+      email: 'quality1@i40pilot.app',
       role: 'quality_technician',
       team_name: 'Quality Team',
       machine_name: '',
@@ -500,7 +515,7 @@ export const generateTeamTemplate = () => {
       working_time_minutes: 480
     },
     {
-      email: 'maintenance1@example.com',
+      email: 'maintenance1@i40pilot.app',
       role: 'maintenance_technician',
       team_name: 'Maintenance Team',
       machine_name: '',
@@ -780,8 +795,8 @@ export const parseDataExcel = async (file: File): Promise<ExcelImportResult> => 
 export const generateSampleDataTemplates = () => {
   // Common data to ensure consistency - updated to match actual data
   const operators = [
-    'operator1@example.com',
-    'operator2@example.com'
+    'operator1@i40pilot.app',
+    'operator2@i40pilot.app'
   ];
 
   const machines = [
@@ -1054,8 +1069,8 @@ export const generateSampleDataTemplates = () => {
     [''],
     ['Team Members:'],
     ['Email', 'Machine', 'Team', 'Shift'],
-    ['operator1@example.com', 'Machine 1', 'Team A', '06:00-14:00'],
-    ['operator2@example.com', 'Machine 2', 'Team B', '14:00-22:00'],
+    ['operator1@i40pilot.app', 'Machine 1', 'Team A', '06:00-14:00'],
+    ['operator2@i40pilot.app', 'Machine 2', 'Team B', '14:00-22:00'],
     [''],
     ['Quality Categories:'],
     ['Category', 'Description'],

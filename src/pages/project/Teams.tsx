@@ -1,7 +1,8 @@
+// src/pages/TeamsPage.tsx
 import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useForm } from 'react-hook-form';
-import { 
+import {
   Upload,
   Check,
   AlertCircle,
@@ -21,6 +22,17 @@ import TeamFormDialog from '../../components/teams/TeamFormDialog';
 import TeamImportPreview from '../../components/teams/TeamImportPreview';
 import type { TeamMember } from '../../types';
 
+/** Résultat de bulkCheckMembers */
+interface CheckResult {
+  newInserts: TeamMember[];
+  duplicates: Array<{
+    email: string;
+    existing: TeamMember;
+    new: Partial<TeamMember>;
+  }>;
+  errors: Array<{ row: number; message: string }>;
+}
+
 interface TeamFormData {
   email: string;
   role: string;
@@ -34,21 +46,30 @@ const TeamsPage: React.FC = () => {
   const { projectId } = useParams<{ projectId: string }>();
   const navigate = useNavigate();
 
-  const { members, roles, loading: teamLoading, error, fetchMembers, fetchRoles, createMember, updateMember, deleteMember, bulkCreateMembers, bulkInviteMembers } = useTeamStore();
+  const {
+    members,
+    roles,
+    loading: teamLoading,
+    error,
+    fetchMembers,
+    fetchRoles,
+    createMember,
+    updateMember,
+    deleteMember,
+    bulkCheckMembers,
+    bulkInviteMembers
+  } = useTeamStore();
+
   const { machines, loading: machinesLoading, fetchMachines } = useMachineStore();
   const { lines, loading: linesLoading, fetchLines } = useProductionLineStore();
   const { updateStepStatus } = useOnboardingStore();
 
+  const [importPreview, setImportPreview] = useState<CheckResult | null>(null);
   const [isExcelMode, setIsExcelMode] = useState(false);
   const [excelError, setExcelError] = useState<string | null>(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState<string | null>(null);
   const [editingMember, setEditingMember] = useState<TeamMember | null>(null);
   const [showFormDialog, setShowFormDialog] = useState(false);
-  // For the preview modal, on every Excel import, we force l'affichage du modal
-  const [importPreview, setImportPreview] = useState<{
-    errors: Array<{ row: number; message: string }>;
-    members: TeamMember[];
-  } | null>(null);
 
   const {
     register,
@@ -56,7 +77,7 @@ const TeamsPage: React.FC = () => {
     reset,
     setValue,
     watch,
-    formState: { errors }
+    formState: { errors: formErrors }
   } = useForm<TeamFormData>();
 
   const selectedRole = watch('role');
@@ -91,6 +112,7 @@ const TeamsPage: React.FC = () => {
     }
   }, [editingMember, setValue, reset]);
 
+  // Création/Update manuels
   const onSubmit = async (data: TeamFormData) => {
     if (!projectId) return;
     try {
@@ -118,22 +140,15 @@ const TeamsPage: React.FC = () => {
     }
   };
 
-  // MODIFICATION : Afficher systématiquement la prévisualisation après import
+  // Upload Excel => bulkCheckMembers (dry run)
   const handleExcelUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     setExcelError(null);
     if (file && projectId) {
       try {
         const parsed = await parseTeamExcel(file);
-        const result = await bulkCreateMembers(projectId, parsed);
-        // Forcer l'affichage du modal de prévisualisation, même si aucun membre n'est créé
-        setImportPreview({
-          errors: result.errors.map((error, index) => ({
-            row: index + 2,
-            message: error.message
-          })),
-          members: result.created
-        });
+        const checkResult = await bulkCheckMembers(projectId, parsed);
+        setImportPreview(checkResult);
       } catch (error) {
         setExcelError((error as Error).message);
       }
@@ -193,11 +208,45 @@ const TeamsPage: React.FC = () => {
     }
   };
 
-  const getRoleById = (roleId: string) => roles.find(role => role.id === roleId);
-  const getMachineById = (machineId?: string) => machineId ? machines.find(machine => machine.id === machineId) : undefined;
-  const getLineById = (lineId?: string) => lineId ? lines.find(line => line.id === lineId) : undefined;
+  // Helpers pour l'affichage
+  const getRoleById = (roleId: string) => roles.find((r) => r.id === roleId);
+  const getMachineById = (machineId?: string) => machines.find((m) => m.id === machineId);
+  const getLineById = (lineId?: string) => lines.find((l) => l.id === lineId);
 
   const isLoading = teamLoading || machinesLoading || linesLoading;
+
+  const getStatusTag = (status: string) => {
+    let bgClass = '';
+    let textClass = '';
+
+    switch (status) {
+      case 'active':
+        bgClass = 'bg-green-100';
+        textClass = 'text-green-800';
+        break;
+      case 'invited':
+        bgClass = 'bg-blue-100';
+        textClass = 'text-blue-800';
+        break;
+      case 'pending':
+        bgClass = 'bg-yellow-100';
+        textClass = 'text-yellow-800';
+        break;
+      case 'inactive':
+        bgClass = 'bg-red-100';
+        textClass = 'text-red-800';
+        break;
+      default:
+        bgClass = 'bg-gray-100';
+        textClass = 'text-gray-800';
+    }
+
+    return (
+      <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${bgClass} ${textClass}`}>
+        {status.charAt(0).toUpperCase() + status.slice(1)}
+      </span>
+    );
+  };
 
   return (
     <ProjectLayout>
@@ -220,7 +269,7 @@ const TeamsPage: React.FC = () => {
           </div>
         ) : (
           <>
-            {/* Sélecteur de mode Manual / Excel Import */}
+            {/* Mode Manual / Excel */}
             <div className="bg-white shadow-sm rounded-lg p-6 mb-6">
               <div className="bg-gray-50 p-4 rounded-lg">
                 <div className="flex items-center space-x-4">
@@ -343,6 +392,9 @@ const TeamsPage: React.FC = () => {
                             <p className="mt-1 text-sm text-gray-500">
                               Working time: {member.working_time_minutes} minutes
                             </p>
+                            <p className="mt-1 text-sm text-gray-500">
+                              Status: {getStatusTag(member.status)}
+                            </p>
                           </div>
                           <div className="flex space-x-2">
                             {member.status === 'pending' && (
@@ -386,7 +438,7 @@ const TeamsPage: React.FC = () => {
               )}
             </div>
 
-            {/* Formulaire de création/édition */}
+            {/* Formulaire (création/édition) */}
             {showFormDialog && (
               <TeamFormDialog
                 member={editingMember}
@@ -396,7 +448,7 @@ const TeamsPage: React.FC = () => {
                 onSubmit={handleSubmit(onSubmit)}
                 onClose={handleCloseDialog}
                 register={register}
-                errors={errors}
+                errors={formErrors}
                 selectedRole={selectedRole}
               />
             )}
@@ -411,7 +463,9 @@ const TeamsPage: React.FC = () => {
                   <span className="hidden sm:inline-block sm:align-middle sm:h-screen" aria-hidden="true">
                     &#8203;
                   </span>
-                  <div className="inline-block align-bottom bg-white rounded-lg px-4 pt-5 pb-4 text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg sm:w-full sm:p-6">
+                  <div className="inline-block align-bottom bg-white rounded-lg px-4 pt-5 pb-4 text-left
+                                  overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle
+                                  sm:max-w-lg sm:w-full sm:p-6">
                     <div>
                       <div className="mt-3 text-center sm:mt-5">
                         <h3 className="text-lg leading-6 font-medium text-gray-900">Delete Team Member</h3>
@@ -425,15 +479,21 @@ const TeamsPage: React.FC = () => {
                     <div className="mt-5 sm:mt-6 sm:grid sm:grid-cols-2 sm:gap-3 sm:grid-flow-row-dense">
                       <button
                         type="button"
-                        onClick={() => confirmDelete(showDeleteConfirm)}
-                        className="w-full inline-flex justify-center rounded-md border border-transparent shadow-sm px-4 py-2 bg-red-600 text-base font-medium text-white hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 sm:col-start-2 sm:text-sm"
+                        onClick={() => confirmDelete(showDeleteConfirm!)}
+                        className="w-full inline-flex justify-center rounded-md border border-transparent
+                                   shadow-sm px-4 py-2 bg-red-600 text-base font-medium text-white hover:bg-red-700
+                                   focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500
+                                   sm:col-start-2 sm:text-sm"
                       >
                         Delete
                       </button>
                       <button
                         type="button"
                         onClick={() => setShowDeleteConfirm(null)}
-                        className="mt-3 w-full inline-flex justify-center rounded-md border border-gray-300 shadow-sm px-4 py-2 bg-white text-base font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 sm:mt-0 sm:col-start-1 sm:text-sm"
+                        className="mt-3 w-full inline-flex justify-center rounded-md border border-gray-300
+                                   shadow-sm px-4 py-2 bg-white text-base font-medium text-gray-700 hover:bg-gray-50
+                                   focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500
+                                   sm:mt-0 sm:col-start-1 sm:text-sm"
                       >
                         Cancel
                       </button>
@@ -443,11 +503,11 @@ const TeamsPage: React.FC = () => {
               </div>
             )}
 
-            {/* Prévisualisation de l'import Excel */}
+            {/* Modal de prévisualisation (dry run) */}
             {importPreview && (
               <TeamImportPreview
-                errors={importPreview.errors}
-                members={importPreview.members}
+                projectId={projectId!}
+                checkResult={importPreview}
                 onClose={() => setImportPreview(null)}
                 getMachineName={(machineId) => {
                   const found = machines.find((m) => m.id === machineId);
@@ -459,7 +519,7 @@ const TeamsPage: React.FC = () => {
                 }}
                 getRoleName={(roleId) => {
                   const found = roles.find((r) => r.id === roleId);
-                  return found ? found.name : 'Unknown Role';
+                  return found ? found.name : roleId;
                 }}
               />
             )}

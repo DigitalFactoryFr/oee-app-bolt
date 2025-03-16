@@ -129,112 +129,11 @@ export const useMachineStore = create<MachineState>((set, get) => ({
     }
   },
 
-  bulkCreateMachines: async (projectId, machines) => {
-    try {
-      set({ loading: true, error: null });
-
-      // Get all production lines for this project
-      const { data: lines, error: linesError } = await supabase
-        .from('production_lines')
-        .select('id, name')
-        .eq('project_id', projectId);
-
-      if (linesError) throw linesError;
-
-      if (!lines || lines.length === 0) {
-        throw new Error('No production lines found for this project');
-      }
-
-      // Get existing machines
-      const { data: existingMachines, error: machinesError } = await supabase
-        .from('machines')
-        .select('*')
-        .eq('project_id', projectId);
-
-      if (machinesError) throw machinesError;
-
-      // Create maps for quick lookup
-      const linesByName = new Map(lines.map(line => [line.name.toLowerCase(), line]));
-      const existingMachinesByKey = new Map();
-      
-      existingMachines?.forEach(machine => {
-        const line = lines.find(l => l.id === machine.line_id);
-        if (line) {
-          const key = `${line.name.toLowerCase()}-${machine.name.toLowerCase()}`;
-          existingMachinesByKey.set(key, machine);
-        }
-      });
-
-      const duplicates: Array<{
-        name: string;
-        existing: Machine;
-        new: Partial<Machine>;
-      }> = [];
-      const created: Machine[] = [];
-
-      // Process each machine
-      for (const machine of machines) {
-        const line = linesByName.get(machine.line_name.toLowerCase());
-        
-        if (!line) {
-          throw new Error(`Production line "${machine.line_name}" not found`);
-        }
-
-        const key = `${machine.line_name.toLowerCase()}-${machine.name.toLowerCase()}`;
-        const existingMachine = existingMachinesByKey.get(key);
-
-        if (existingMachine) {
-          duplicates.push({
-            name: machine.name,
-            existing: existingMachine,
-            new: {
-              description: machine.description,
-              opening_time_minutes: machine.opening_time_minutes,
-            }
-          });
-        } else {
-          const { data, error } = await supabase
-            .from('machines')
-            .insert([{
-              project_id: projectId,
-              line_id: line.id,
-              name: machine.name,
-              description: machine.description,
-              opening_time_minutes: machine.opening_time_minutes,
-              status: 'in_progress'
-            }])
-            .select()
-            .single();
-
-          if (error) throw error;
-          if (data) created.push(data as Machine);
-        }
-      }
-
-      // Update local state
-      if (created.length > 0) {
-        set((state) => ({
-          machines: [...state.machines, ...created],
-          loading: false,
-          error: null
-        }));
-      } else {
-        set({ loading: false, error: null });
-      }
-
-      return { duplicates, created };
-    } catch (error) {
-      console.error('Error in bulkCreateMachines:', error);
-      set({ error: (error as Error).message, loading: false });
-      throw error;
-    }
-  },
-
-bulkCreateMachines: async (projectId, machines) => {
+async bulkCreateMachines(projectId, machines) {
   try {
     set({ loading: true, error: null });
 
-    // Récupère toutes les lignes de production pour ce projet
+    // Récupérer toutes les production lines pour ce projet
     const { data: lines, error: linesError } = await supabase
       .from('production_lines')
       .select('id, name')
@@ -246,7 +145,7 @@ bulkCreateMachines: async (projectId, machines) => {
       throw new Error('No production lines found for this project');
     }
 
-    // Récupère les machines existantes
+    // Récupérer les machines existantes pour ce projet
     const { data: existingMachines, error: machinesError } = await supabase
       .from('machines')
       .select('*')
@@ -254,12 +153,11 @@ bulkCreateMachines: async (projectId, machines) => {
 
     if (machinesError) throw machinesError;
 
-    // Création de Map pour accès rapide
-    const linesByName = new Map(
-      lines.map(line => [line.name.toLowerCase(), line])
-    );
+    // Créer une map pour rechercher rapidement les production lines par nom (en minuscule)
+    const linesByName = new Map(lines.map(line => [line.name.toLowerCase(), line]));
 
-    const existingMachinesByKey = new Map();
+    // Construire une map des machines existantes avec une clé basée sur (line_name + machine name)
+    const existingMachinesByKey = new Map<string, any>();
     existingMachines?.forEach(machine => {
       const line = lines.find(l => l.id === machine.line_id);
       if (line) {
@@ -274,37 +172,34 @@ bulkCreateMachines: async (projectId, machines) => {
       new: Partial<Machine>;
     }> = [];
     const created: Machine[] = [];
+    const errorsArray: Array<{ row: number; message: string }> = [];
 
-    // Parcours des machines à importer
-    for (const machine of machines) {
-      // 1) Vérifie line_name
+    // Process each machine from the Excel file
+    for (let i = 0; i < machines.length; i++) {
+      const rowIndex = i + 2; // pour référence de ligne dans Excel
+      const machine = machines[i];
+
+      // Vérifier que line_name est présent ; sinon, ajouter une erreur et passer à la suite
       if (!machine.line_name) {
-        console.warn(
-          `[bulkCreateMachines] Skipping row because "line_name" is missing. Data:`,
-          machine
-        );
-        continue; // On ignore cette entrée ou on throw une Error, au choix
-      }
-
-      // 2) Vérifie name
-      if (!machine.name) {
-        console.warn(
-          `[bulkCreateMachines] Skipping row because "machine.name" is missing. Data:`,
-          machine
-        );
+        errorsArray.push({
+          row: rowIndex,
+          message: `Production line is missing for machine "${machine.name}"`,
+        });
         continue;
       }
 
-      const lineNameLower = machine.line_name.toLowerCase();
-      const line = linesByName.get(lineNameLower);
+      const lineNameKey = machine.line_name.trim().toLowerCase();
+      const line = linesByName.get(lineNameKey);
       if (!line) {
-        // Ici, on peut décider de stopper tout ou juste ignorer
-        throw new Error(
-          `Production line "${machine.line_name}" not found in database.`
-        );
+        errorsArray.push({
+          row: rowIndex,
+          message: `Production line "${machine.line_name}" not found for machine "${machine.name}"`,
+        });
+        continue;
       }
 
-      const key = `${lineNameLower}-${machine.name.toLowerCase()}`;
+      // Construire la clé unique (line_name + machine name)
+      const key = `${lineNameKey}-${machine.name.toLowerCase()}`;
       const existingMachine = existingMachinesByKey.get(key);
 
       if (existingMachine) {
@@ -317,7 +212,6 @@ bulkCreateMachines: async (projectId, machines) => {
           },
         });
       } else {
-        // Insertion Supabase
         const { data, error } = await supabase
           .from('machines')
           .insert([
@@ -333,30 +227,28 @@ bulkCreateMachines: async (projectId, machines) => {
           .select()
           .single();
 
-        if (error) throw error;
+        if (error) {
+          errorsArray.push({
+            row: rowIndex,
+            message: `Insert error for machine "${machine.name}": ${error.message}`,
+          });
+          continue;
+        }
         if (data) {
           created.push(data as Machine);
         }
       }
     }
 
-    // Mise à jour du state local
-    if (created.length > 0) {
-      set((state) => ({
-        machines: [...state.machines, ...created],
-        loading: false,
-        error: null,
-      }));
-    } else {
-      set({ loading: false, error: null });
-    }
-
-    return { duplicates, created };
+    // Mettre à jour l'état local
+    set({ loading: false, error: null });
+    return { duplicates, created, errors: errorsArray };
   } catch (error) {
     console.error('Error in bulkCreateMachines:', error);
     set({ error: (error as Error).message, loading: false });
     throw error;
   }
-},
+}
+
 
 }));
