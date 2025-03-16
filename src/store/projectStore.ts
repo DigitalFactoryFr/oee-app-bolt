@@ -14,7 +14,6 @@ interface ProjectState {
   deleteProject: (id: string) => Promise<void>;
   setCurrentProject: (project: Project | null) => void;
   clearCurrentProject: () => void;
-  loadCurrentProject: () => void;
 }
 
 export const useProjectStore = create<ProjectState>((set) => ({
@@ -22,12 +21,10 @@ export const useProjectStore = create<ProjectState>((set) => ({
   currentProject: null,
   loading: false,
   error: null,
-
-  // Sauvegarde le projet courant dans le localStorage (placeholder NON enregistré)
+  
   setCurrentProject: (project) => {
     set({ currentProject: project });
-    // On ne sauvegarde PAS le placeholder dans le localStorage
-    if (project && project.id !== 'default') {
+    if (project) {
       localStorage.setItem('currentProject', JSON.stringify(project));
     } else {
       localStorage.removeItem('currentProject');
@@ -39,26 +36,24 @@ export const useProjectStore = create<ProjectState>((set) => ({
     localStorage.removeItem('currentProject');
   },
 
-  loadCurrentProject: async () => {
-    const savedProject = localStorage.getItem('currentProject');
-    if (savedProject) {
-      try {
-        set({ currentProject: JSON.parse(savedProject) });
-      } catch (error) {
-        console.error("Erreur lors du chargement du projet depuis localStorage:", error);
-        set({ currentProject: null });
-        localStorage.removeItem('currentProject');
-      }
-    }
-  },
 
+  loadCurrentProject: () => {
+  const savedProject = localStorage.getItem('currentProject');
+  if (savedProject) {
+    try {
+      set({ currentProject: JSON.parse(savedProject) });
+    } catch (error) {
+      console.error("Erreur lors du chargement du projet depuis localStorage:", error);
+    }
+  }
+},
+
+  
   fetchProjects: async () => {
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) {
-        console.warn("[ProjectStore] ❌ Aucun utilisateur trouvé, suppression des projets");
-        set({ projects: [], currentProject: null, loading: false });
-        localStorage.removeItem('currentProject');
+        set({ projects: [], loading: false });
         return;
       }
 
@@ -67,28 +62,25 @@ export const useProjectStore = create<ProjectState>((set) => ({
       const { data, error } = await supabase
         .from('projects')
         .select('*')
-        .eq('user_id', user.id) // Charge uniquement les projets créés par l'utilisateur
         .order('created_at', { ascending: false });
 
       if (error) throw error;
+      set({ projects: data || [], loading: false });
+      
+      
+      if (data && data.length > 0) {
+        console.log("[ProjectStore] ✅ Sélection du premier projet :", data[0]);
+        set({ currentProject: data[0] });
+        localStorage.setItem('currentProject', JSON.stringify(data[0]));
+}
 
-      if (!data || data.length === 0) {
-        console.warn("[ProjectStore] 🚨 Aucun projet trouvé pour cet utilisateur");
-        // Affecte le placeholder sans le sauvegarder dans le localStorage
-        set({ projects: [], currentProject: { id: 'default', name: 'My First Project', user_id: user.id }, loading: false });
-        localStorage.removeItem('currentProject');
-        return;
-      }
-
-      // S'il existe des projets réels, on utilise le premier projet de la liste
-      set({ projects: data, currentProject: data[0], loading: false });
-      localStorage.setItem('currentProject', JSON.stringify(data[0]));
+      
     } catch (error) {
       console.error('Error fetching projects:', error);
       set({ error: (error as Error).message, loading: false });
     }
   },
-
+  
   fetchProject: async (id) => {
     try {
       set({ loading: true, error: null });
@@ -99,13 +91,16 @@ export const useProjectStore = create<ProjectState>((set) => ({
         .single();
       
       if (error) throw error;
-      if (data) {
-        set({ currentProject: data as Project, loading: false });
-      } else {
-        console.log("[ProjectStore] ⚠️ Aucun projet trouvé, suppression du projet local");
+      set({ currentProject: data as Project, loading: false });
+
+      if (!data) {
+        console.log("[ProjectStore] ⚠️ Aucun projet trouvé, redirection vers /projects/new");
         set({ currentProject: null });
         localStorage.removeItem('currentProject');
       }
+
+
+      
     } catch (error) {
       console.error('Error fetching project:', error);
       set({ error: (error as Error).message, loading: false });
@@ -115,29 +110,39 @@ export const useProjectStore = create<ProjectState>((set) => ({
   createProject: async (name, description = '') => {
     try {
       set({ loading: true, error: null });
+      
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) {
         throw new Error('User not authenticated');
       }
 
+      // Create project
       const { data: project, error: projectError } = await supabase
         .from('projects')
-        .insert({ name, description, user_id: user.id })
+        .insert({
+          name,
+          description,
+          user_id: user.id
+        })
         .select()
         .single();
       
       if (projectError) throw projectError;
 
+
+      
       set((state) => {
-        console.log("[ProjectStore] ✅ Projet créé :", project);
-        // Sauvegarde dans localStorage uniquement si c'est un vrai projet
-        localStorage.setItem('currentProject', JSON.stringify(project));
-        return {
-          projects: [project as Project, ...state.projects],
-          currentProject: project as Project,
-          loading: false
-        };
-      });
+  console.log("[ProjectStore] ✅ Projet créé :", project);
+  localStorage.setItem('currentProject', JSON.stringify(project));
+
+      return { 
+        projects: [project as Project, ...state.projects],
+        currentProject: project as Project,
+        loading: false
+      };
+    });
+
+      
       return project as Project;
     } catch (error) {
       console.error('Error creating project:', error);
@@ -149,19 +154,22 @@ export const useProjectStore = create<ProjectState>((set) => ({
   updateProject: async (id, projectData) => {
     try {
       set({ loading: true, error: null });
+      
       const { error } = await supabase
         .from('projects')
         .update(projectData)
         .eq('id', id);
+      
       if (error) throw error;
       
       set((state) => {
-        const updatedProjects = state.projects.map(project =>
+        const updatedProjects = state.projects.map(project => 
           project.id === id ? { ...project, ...projectData } : project
         );
-        return {
+        
+        return { 
           projects: updatedProjects,
-          currentProject: state.currentProject?.id === id
+          currentProject: state.currentProject?.id === id 
             ? { ...state.currentProject, ...projectData }
             : state.currentProject,
           loading: false
@@ -176,26 +184,27 @@ export const useProjectStore = create<ProjectState>((set) => ({
   deleteProject: async (id) => {
     try {
       set({ loading: true, error: null });
+      
       const { error } = await supabase
         .from('projects')
         .delete()
         .eq('id', id);
+      
       if (error) throw error;
       
-      set((state) => {
-        const isCurrentDeleted = state.currentProject?.id === id;
-        console.log("[ProjectStore] 🗑️ Projet supprimé :", id);
-        return {
-          projects: state.projects.filter(project => project.id !== id),
-          currentProject: isCurrentDeleted ? null : state.currentProject,
-          loading: false
-        };
-      });
+      set((state) => ({ 
+        projects: state.projects.filter(project => project.id !== id),
+        currentProject: state.currentProject?.id === id ? null : state.currentProject,
+        loading: false
+      }));
       
-      if (get().currentProject?.id === id) {
+      if (state.currentProject?.id === id) {
+        console.log("[ProjectStore] 🗑️ Projet supprimé, redirection vers /projects/new");
         set({ currentProject: null });
         localStorage.removeItem('currentProject');
       }
+
+      
     } catch (error) {
       console.error('Error deleting project:', error);
       set({ error: (error as Error).message, loading: false });

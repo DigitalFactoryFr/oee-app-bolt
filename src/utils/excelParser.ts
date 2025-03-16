@@ -415,89 +415,63 @@ export const generateProductsTemplate = () => {
 export const parseTeamExcel = async (file: File): Promise<TeamExcelData[]> => {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
-
     reader.onload = (e) => {
       try {
         if (!e.target?.result) {
           throw new Error('Failed to read file');
         }
-
         const data = new Uint8Array(e.target.result as ArrayBuffer);
         const workbook = XLSX.read(data, { type: 'array' });
-
         if (workbook.SheetNames.length === 0) {
           throw new Error('Excel file is empty');
         }
-
         const worksheet = workbook.Sheets[workbook.SheetNames[0]];
+        // Utiliser les en-têtes définis et ignorer la première ligne (en-têtes)
         const jsonData = XLSX.utils.sheet_to_json(worksheet, {
-          header: ['email', 'role', 'team_name', 'line_name', 'machine_name', 'working_time_minutes'],
+          header: ['email', 'role', 'team_name', 'machine_name', 'line_name', 'working_time_minutes'],
           range: 1
         });
-
-        console.log("📊 Excel data:", jsonData);
-
         if (!Array.isArray(jsonData) || jsonData.length === 0) {
           throw new Error('No data found in Excel file');
         }
-
         const members: TeamExcelData[] = jsonData.map((row: any, index) => {
+          // Vérifier que les champs obligatoires sont présents
           if (!row.email || !row.role || !row.team_name || !row.working_time_minutes) {
             throw new Error(`Row ${index + 2}: All fields except line_name and machine_name are required`);
           }
-
           const email = String(row.email).trim().toLowerCase();
-          if (!email.match(/^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/)) {
-            throw new Error(`Row ${index + 2}: Invalid email address format`);
-          }
-
           const role = String(row.role).trim().toLowerCase();
-          if (!['owner', 'team_manager', 'operator', 'quality_technician', 'maintenance_technician'].includes(role)) {
-            throw new Error(`Row ${index + 2}: Invalid role (must be one of: owner, team_manager, operator, quality_technician, maintenance_technician)`);
+          const team_name = String(row.team_name).trim();
+          const machine_name = row.machine_name ? String(row.machine_name).trim() : undefined;
+          let line_name = row.line_name ? String(row.line_name).trim() : undefined;
+          // Pour les team managers, normaliser la valeur de line_name
+          if (role === 'team_manager') {
+            if (!line_name) {
+              throw new Error(`Row ${index + 2}: Production line is required for team manager role`);
+            }
+            if (line_name.toLowerCase() === 'line 1') {
+              line_name = 'Production line 1';
+            }
           }
-
-          // Validate role-specific fields
-          if (role === 'operator' && !row.machine_name) {
-            throw new Error(`Row ${index + 2}: Machine name is required for operators`);
+          const working_time_minutes = Number(row.working_time_minutes);
+          if (isNaN(working_time_minutes) || working_time_minutes <= 0 || working_time_minutes > 1440) {
+            throw new Error(`Row ${index + 2}: Invalid working time (must be between 1 and 1440 minutes)`);
           }
-          if (role === 'team_manager' && !row.line_name) {
-            throw new Error(`Row ${index + 2}: Line name is required for team managers`);
-          }
-          if (['owner', 'quality_technician', 'maintenance_technician'].includes(role) && (row.machine_name || row.line_name)) {
-            throw new Error(`Row ${index + 2}: ${role} cannot be assigned to a machine or line`);
-          }
-
-          const workingTime = Number(row.working_time_minutes);
-          if (isNaN(workingTime) || workingTime <= 0 || workingTime > 1440) {
-            throw new Error(`Row ${index + 2}: Invalid working time value (must be between 1 and 1440 minutes)`);
-          }
-
-          return {
-            email,
-            role,
-            team_name: String(row.team_name).trim(),
-            line_name: row.line_name ? String(row.line_name).trim() : undefined,
-            machine_name: row.machine_name ? String(row.machine_name).trim() : undefined,
-            working_time_minutes: workingTime
-          };
+          return { email, role, team_name, machine_name, line_name, working_time_minutes };
         });
-
-        console.log("✅ Parsed team members:", members);
         resolve(members);
-
       } catch (error) {
-        console.error("❌ Error parsing Excel:", error);
         reject(error);
       }
     };
-
     reader.onerror = () => {
       reject(new Error('Failed to read Excel file'));
     };
-
     reader.readAsArrayBuffer(file);
   });
 };
+
+
 
 export const generateTeamTemplate = () => {
   const template = [
@@ -514,7 +488,7 @@ export const generateTeamTemplate = () => {
       role: 'team_manager',
       team_name: 'Team B',
       machine_name: '',
-      line_name: 'Line 1',
+      line_name: 'Production line 1',
       working_time_minutes: 480
     },
     {

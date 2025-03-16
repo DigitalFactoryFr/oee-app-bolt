@@ -92,10 +92,6 @@ useEffect(() => {
 }, [loading, projects, currentProject, setCurrentProject]);
 
 
-
-
-
-
   useEffect(() => {
     if (currentProject?.id) {
       const fetchData = async () => {
