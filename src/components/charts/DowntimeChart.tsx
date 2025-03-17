@@ -1,22 +1,17 @@
+// src/components/charts/DowntimeChart.tsx
+
 import React from 'react';
 import { PieChart, Pie, Cell, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 
 interface DowntimeData {
-  name: string;   // ex. 'AP', 'PA', 'DO', 'NQ', 'other'
-  value: number;  // heures sur la période courante
-  color: string;  // couleur pour la part
-}
-
-interface DowntimeComparisonData {
-  name: string;
-  value: number;
-  color: string;
-  value_prev?: number; // on ajoutera manuellement si on fusionne
+  name: string;    // ex. 'AP', 'PA', 'DO', 'NQ', 'other'
+  value: number;   // heures sur la période courante
+  color: string;   // couleur pour la part
 }
 
 interface DowntimeChartProps {
-  data: DowntimeData[];
-  comparisonData?: DowntimeData[];
+  data: DowntimeData[];             // distribution courante
+  comparisonData?: DowntimeData[];  // distribution comparée
   showComparison?: boolean;
   comparisonLabel?: string;
 }
@@ -27,16 +22,39 @@ const DowntimeChart: React.FC<DowntimeChartProps> = ({
   showComparison = false,
   comparisonLabel = 'Previous Period'
 }) => {
-  // Fusionner la data => si "showComparison" est true, on ajoute value_prev
-  const combinedData = data.map((item) => {
-    const foundPrev = comparisonData?.find((d) => d.name === item.name);
+  // 1) Récupérer l'ensemble des catégories (name) présentes
+  const allNames = new Set(data.map(d => d.name));
+  if (showComparison && comparisonData) {
+    comparisonData.forEach(d => allNames.add(d.name));
+  }
+
+  // 2) Construire un tableau fusionné "combinedData"
+  //    pour que chaque catégorie apparaisse avec :
+  //      - value : valeur courante
+  //      - value_prev : valeur comparée
+  //      - color : la couleur de la catégorie
+
+  console.log('[DowntimeChart] data:', data);
+console.log('[DowntimeChart] comparisonData:', comparisonData);
+
+  const combinedData = Array.from(allNames).map(name => {
+    // Chercher la catégorie correspondante dans data (courant)
+    const current = data.find(d => d.name === name);
+    // Chercher la catégorie correspondante dans comparisonData (si présente)
+    const prev = comparisonData?.find(d => d.name === name);
+
     return {
-      ...item,
-      value_prev: foundPrev ? foundPrev.value : 0
+      name,
+      value: current?.value ?? 0,
+      // On récupère la couleur depuis la période courante,
+      // ou depuis la comparaison si elle n'est pas définie dans current,
+      // ou une couleur par défaut (#999999).
+      color: current?.color || prev?.color || '#999999',
+      value_prev: prev?.value ?? 0
     };
   });
 
-  // Tooltip personnalisé
+  // 3) Tooltip personnalisé
   const CustomTooltip = ({ active, payload }: any) => {
     if (active && payload && payload.length > 0) {
       const item = payload[0].payload;
@@ -58,7 +76,7 @@ const DowntimeChart: React.FC<DowntimeChartProps> = ({
   return (
     <ResponsiveContainer width="100%" height={300}>
       <PieChart>
-        {/* Pie pour la période courante */}
+        {/* Donut principal (période courante) */}
         <Pie
           data={combinedData}
           dataKey="value"
@@ -68,13 +86,17 @@ const DowntimeChart: React.FC<DowntimeChartProps> = ({
           innerRadius={60}
           outerRadius={80}
           paddingAngle={5}
-          label={({ name, percent }) => `${name} ${(percent*100).toFixed(0)}%`}
+          label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
         >
           {combinedData.map((entry, index) => (
-            <Cell key={`cell-${index}`} fill={entry.color} />
+            <Cell
+              key={`cell-${index}`}
+              fill={entry.color}
+            />
           ))}
         </Pie>
-        {/* Pie pour la période de comparaison */}
+
+        {/* Donut pour la période de comparaison */}
         {showComparison && (
           <Pie
             data={combinedData}
@@ -89,7 +111,11 @@ const DowntimeChart: React.FC<DowntimeChartProps> = ({
             labelLine={false}
           >
             {combinedData.map((entry, index) => (
-              <Cell key={`cell-prev-${index}`} fill={entry.color} fillOpacity={0.4} />
+              <Cell
+                key={`cell-prev-${index}`}
+                fill={entry.color}
+                fillOpacity={0.4}
+              />
             ))}
           </Pie>
         )}

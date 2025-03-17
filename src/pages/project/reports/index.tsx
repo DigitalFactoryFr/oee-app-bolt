@@ -1,5 +1,3 @@
-// src/pages/project/reports/index.tsx
-
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
@@ -40,7 +38,9 @@ import ComparisonModal from '../../../components/reports/ComparisonModal';
 import ComparisonSelector from '../../../components/reports/ComparisonSelector';
 import FilterPanel from '../../../components/reports/FilterPanel';
 
-// ------------------- Types et interfaces -------------------
+// ---------------------------------------------------
+//                 Types et interfaces
+// ---------------------------------------------------
 interface Metrics {
   oee: number;
   availability: number;
@@ -54,7 +54,9 @@ interface Metrics {
 
 type PeriodType = 'today' | 'yesterday' | 'week' | 'month' | 'quarter';
 
-// ------------------- Fonctions de merge -------------------
+// ---------------------------------------------------
+//                 Fonctions de merge
+// ---------------------------------------------------
 function mergeOEEData(dataA: any[], dataB: any[]) {
   const allDates = new Set([...dataA.map(d => d.date), ...dataB.map(d => d.date)]);
   const mapA = new Map(dataA.map(d => [d.date, d]));
@@ -153,7 +155,14 @@ function mergeStopTimeData(dataA: any[], dataB: any[]) {
   return merged.sort((a, b) => (a.date < b.date ? -1 : 1));
 }
 
-// ------------------- Composant principal -------------------
+// Exemple simple : on retourne un tableau [distA, distB] pour un "double donut"
+function mergeDowntimeDistribution(distA: any[], distB: any[]) {
+  return [distA, distB];
+}
+
+// ---------------------------------------------------
+//                 Composant principal
+// ---------------------------------------------------
 const ReportsPage: React.FC = () => {
   const { projectId } = useParams<{ projectId: string }>();
   const navigate = useNavigate();
@@ -174,7 +183,15 @@ const ReportsPage: React.FC = () => {
   const [productionComparisonData, setProductionComparisonData] = useState<any[]>([]);
   const [qualityComparisonData, setQualityComparisonData] = useState<any[]>([]);
   const [stopTimeComparisonData, setStopTimeComparisonData] = useState<any[]>([]);
+  const [downtimeComparisonData, setDowntimeComparisonData] = useState<any[]>([]); // Pour un double donut
   const [comparisonMetrics, setComparisonMetrics] = useState<Metrics | null>(null);
+
+  // Données "normales"
+  const [oeeData, setOeeData] = useState<any[]>([]);
+  const [productionData, setProductionData] = useState<any[]>([]);
+  const [qualityData, setQualityData] = useState<any[]>([]);
+  const [stopTimeData, setStopTimeData] = useState<any[]>([]);
+  const [downtimeData, setDowntimeData] = useState<any[]>([]);
 
   // Tableau fusionné pour OEE
   const [oeeDataMerged, setOeeDataMerged] = useState<any[]>([]);
@@ -198,13 +215,6 @@ const ReportsPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [hasData, setHasData] = useState(false);
-
-  // Données charts (hors comparaison)
-  const [oeeData, setOeeData] = useState<any[]>([]);
-  const [productionData, setProductionData] = useState<any[]>([]);
-  const [qualityData, setQualityData] = useState<any[]>([]);
-  const [stopTimeData, setStopTimeData] = useState<any[]>([]);
-  const [downtimeData, setDowntimeData] = useState<any[]>([]);
 
   // KPI
   const [metrics, setMetrics] = useState<Metrics>({
@@ -250,9 +260,24 @@ const ReportsPage: React.FC = () => {
     setProductionComparisonData([]);
     setQualityComparisonData([]);
     setStopTimeComparisonData([]);
+    setDowntimeComparisonData([]);
     setComparisonMetrics(null);
-    setOeeDataMerged([]); // on vide le merged
+    setOeeDataMerged([]); 
   }
+function mapFailureType(ft: string | null | undefined): string {
+  // On convertit en chaîne, on force en minuscules puis on renvoie en majuscules les valeurs reconnues
+  const ftStr = String(ft || '').toLowerCase();
+  switch (ftStr) {
+    case 'ap':
+    case 'pa':
+    case 'do':
+    case 'nq':
+      return ftStr.toUpperCase();
+    default:
+      return 'CS';
+  }
+}
+
 
   // Helpers pour récupérer des IDs en fonction des noms
   async function getMachineIdsByName(names: string[]): Promise<string[]> {
@@ -337,7 +362,7 @@ const ReportsPage: React.FC = () => {
     }
   }
 
-  // ------------------- loadData (pour charts "normaux") -------------------
+  // ------------------- loadData (pour affichage normal) -------------------
   async function loadData() {
     if (!projectId) return;
     try {
@@ -473,6 +498,7 @@ const ReportsPage: React.FC = () => {
           tmpDowntime.push({
             name: type,
             value: hours,
+            // Couleurs au choix
             color:
               type === 'AP' ? '#2563eb' :
               type === 'PA' ? '#dc2626' :
@@ -522,48 +548,60 @@ const ReportsPage: React.FC = () => {
       });
 
       // 2) Parcourir stops
-      stopsResult.data?.forEach((stop: any) => {
-        const sTime = new Date(stop.start_time);
-        const eTime = stop.end_time ? new Date(stop.end_time) : new Date();
-        const durMin = Math.max(0, differenceInMinutes(eTime, sTime));
-        const dayStr = format(sTime, 'yyyy-MM-dd');
-        if (!dateMap.has(dayStr)) {
-          dateMap.set(dayStr, {
-            date: dayStr,
-            plannedTime: 0,
-            plannedStops: 0,
-            unplannedStops: 0,
-            netTimeSec: 0,
-            okParts: 0,
-            scrapParts: 0,
-            rework: 0,
-            other: 0,
-            actual: 0,
-            target: 0
-          });
-        }
-        const obj = dateMap.get(dayStr);
-        const hours = durMin / 60;
-        addDowntime(stop.failure_type || 'other', hours);
-        obj.unplannedStops += durMin;
+stopsResult.data?.forEach((stop: any) => {
+  const sTime = new Date(stop.start_time);
+  const eTime = stop.end_time ? new Date(stop.end_time) : new Date();
+  const durMin = Math.max(0, differenceInMinutes(eTime, sTime));
+  const dayStr = format(sTime, 'yyyy-MM-dd');
 
-        if (!stopMap.has(dayStr)) {
-          stopMap.set(dayStr, {
-            date: dayStr,
-            AP: 0, PA: 0, DO: 0, NQ: 0, other: 0
-          });
-        }
-        const stObj = stopMap.get(dayStr);
-        const ft = stop.failure_type || 'other';
-        if (['AP', 'PA', 'DO', 'NQ'].includes(ft)) {
-          stObj[ft] += hours;
-        } else {
-          stObj.other += hours;
-        }
-        if (stop.failure_type === 'PA') {
-          obj.plannedStops += durMin;
-        }
-      });
+  // Mise à jour de la map de données par jour
+  if (!dateMap.has(dayStr)) {
+    dateMap.set(dayStr, {
+      date: dayStr,
+      plannedTime: 0,
+      plannedStops: 0,
+      unplannedStops: 0,
+      netTimeSec: 0,
+      okParts: 0,
+      scrapParts: 0,
+      rework: 0,
+      other: 0,
+      actual: 0,
+      target: 0
+    });
+  }
+  const obj = dateMap.get(dayStr);
+  const hours = durMin / 60;
+
+  // Utiliser mapFailureType une seule fois pour convertir la valeur
+  const ft = mapFailureType(stop.failure_type);
+  addDowntime(ft, hours);
+  
+  obj.unplannedStops += durMin;
+
+  // Mise à jour de la map pour le StopTimeChart avec des clés en majuscules pour les valeurs reconnues
+  if (!stopMap.has(dayStr)) {
+    stopMap.set(dayStr, {
+      date: dayStr,
+      AP: 0, PA: 0, DO: 0, NQ: 0, CS: 0
+    });
+  }
+  const stObj = stopMap.get(dayStr);
+  if (ft === 'AP') {
+    stObj.AP += hours;
+  } else if (ft === 'PA') {
+    stObj.PA += hours;
+    // Si c'est un arrêt planifié
+    obj.plannedStops += durMin;
+  } else if (ft === 'DO') {
+    stObj.DO += hours;
+  } else if (ft === 'NQ') {
+    stObj.NQ += hours;
+  } else {
+    stObj.CS += hours;
+  }
+});
+
 
       // 3) Parcourir quality
       qualityResult.data?.forEach((issue: any) => {
@@ -718,14 +756,11 @@ const ReportsPage: React.FC = () => {
     setShowComparisonSelector(true);
   }
 
-  // 1) handleComparisonItems => appelle loadComparisonData pour chaque item, puis fusionne
   async function handleComparisonItems(items: string[]) {
     setShowComparisonSelector(false);
     setShowComparison(true);
 
-    if (items.length < 2) {
-      return;
-    }
+    if (items.length < 2) return;
 
     // Charger dataA
     const dataA = await loadComparisonData(items[0]);
@@ -748,39 +783,45 @@ const ReportsPage: React.FC = () => {
     const mergedStop = mergeStopTimeData(dataA.stopTimeData, dataB.stopTimeData);
     setStopTimeComparisonData(mergedStop);
 
-    // Mettre à jour les KPI de comparaison (ici on récupère ceux de dataB, mais à vous de décider)
+    // Fusion Downtime (double distribution)
+setDowntimeComparisonData(dataB.downtimeData);
+
+    // KPI de comparaison => on prend ceux de dataB (ou une moyenne, à vous de voir)
     setComparisonMetrics(dataB.metrics);
   }
 
-  // 2) loadComparisonData => charge depuis Supabase la data “comparaison” pour un seul item (ici, une machine)
+  // Cette fonction charge la data "comparaison" pour un item (machine/line/product/team)
   async function loadComparisonData(itemName: string) {
-    // 2.1) Récup l'ID de la machine (ou adaptez si vous comparez lines, products, etc.)
-    const machineIDs = await getMachineIdsByName([itemName]);
-    if (!machineIDs.length) {
-      console.log(`[loadComparisonData] No machine found for itemName=${itemName}`);
-      // On renvoie des arrays vides
-      return {
-        oeeData: [],
-        productionData: [],
-        qualityData: [],
-        stopTimeData: [],
-        metrics: {
-          oee: 0,
-          availability: 0,
-          performance: 0,
-          quality: 0,
-          totalProduction: 0,
-          firstPassYield: 0,
-          scrapRate: 0,
-          totalStopTime: 0
-        }
-      };
-    }
-
-    // 2.2) Utiliser la même plage de dates que loadData
     const { startDate, endDate } = getDateRange();
 
-    // 2.3) Construire les requêtes
+    // 1) Trouver les IDs en fonction du type de comparaison
+    let machineIDs: string[] = [];
+    let lineIDs: string[] = [];
+    let productIDs: string[] = [];
+    let teamIDs: string[] = [];
+
+    if (comparisonType === 'machines') {
+      machineIDs = await getMachineIdsByName([itemName]);
+    } else if (comparisonType === 'lines') {
+      lineIDs = await getLineIdsByName([itemName]);
+      if (lineIDs.length) {
+        // Récupérer toutes les machines de cette ligne
+        const { data: machOfLine } = await supabase
+          .from('machines')
+          .select('id, line_id')
+          .eq('project_id', projectId)
+          .in('line_id', lineIDs);
+        if (machOfLine) {
+          machineIDs = machOfLine.map((m: any) => m.id);
+        }
+      }
+    } else if (comparisonType === 'products') {
+      productIDs = await getProductIdsByName([itemName]);
+    } else if (comparisonType === 'teams') {
+      teamIDs = await getTeamMemberIdsByTeamName([itemName]);
+    }
+
+    // 2) Construire les requêtes (mêmes colonnes que loadData)
     let lotsQuery = supabase
       .from('lots')
       .select(`
@@ -795,7 +836,6 @@ const ReportsPage: React.FC = () => {
         products:product ( cycle_time )
       `)
       .eq('project_id', projectId)
-      .in('machine', machineIDs)
       .gte('start_time', startDate.toISOString())
       .lte('start_time', endDate.toISOString());
 
@@ -811,7 +851,6 @@ const ReportsPage: React.FC = () => {
         failure_type
       `)
       .eq('project_id', projectId)
-      .in('machine', machineIDs)
       .gte('start_time', startDate.toISOString())
       .lte('start_time', endDate.toISOString());
 
@@ -827,11 +866,27 @@ const ReportsPage: React.FC = () => {
         quantity
       `)
       .eq('project_id', projectId)
-      .in('machine', machineIDs)
       .gte('date', format(startDate, 'yyyy-MM-dd'))
       .lte('date', format(endDate, 'yyyy-MM-dd'));
 
-    // 2.4) Exécuter
+    // Appliquer les filtres en fonction du type
+    if (machineIDs.length > 0) {
+      lotsQuery.in('machine', machineIDs);
+      stopsQuery.in('machine', machineIDs);
+      qualityQuery.in('machine', machineIDs);
+    }
+    if (productIDs.length > 0) {
+      lotsQuery.in('product', productIDs);
+      stopsQuery.in('product', productIDs);
+      qualityQuery.in('product', productIDs);
+    }
+    if (teamIDs.length > 0) {
+      lotsQuery.in('team_member', teamIDs);
+      stopsQuery.in('team_member', teamIDs);
+      qualityQuery.in('team_member', teamIDs);
+    }
+
+    // 3) Exécuter
     const [lotsResult, stopsResult, qualityResult] = await Promise.all([
       lotsQuery,
       stopsQuery,
@@ -841,29 +896,30 @@ const ReportsPage: React.FC = () => {
     if (stopsResult.error) throw stopsResult.error;
     if (qualityResult.error) throw qualityResult.error;
 
-    // 2.5) Même logique que loadData pour calculer oeeData, productionData, qualityData, stopTimeData
+    // 4) Même logique que loadData => calculer oeeData, productionData, qualityData, stopTimeData + downtime
     const dateMap = new Map<string, any>();
     const stopMap = new Map<string, any>();
     const tmpDowntime: any[] = [];
 
-    function addDowntime(type: string, hours: number) {
-      const found = tmpDowntime.find(x => x.name === type);
-      if (found) found.value += hours;
-      else {
-        tmpDowntime.push({
-          name: type,
-          value: hours,
-          color:
-            type === 'AP' ? '#2563eb' :
-            type === 'PA' ? '#dc2626' :
-            type === 'DO' ? '#eab308' :
-            type === 'NQ' ? '#9333ea' :
-            '#9ca3af'
-        });
-      }
-    }
+function addDowntime(type: string, hours: number) {
+  const found = tmpDowntime.find(x => x.name === type);
+  if (found) {
+    found.value += hours;
+  } else {
+    tmpDowntime.push({
+      name: type,
+      value: hours,
+      color:
+        type === 'AP' ? '#2563eb' :
+        type === 'PA' ? '#dc2626' :
+        type === 'DO' ? '#eab308' :
+        type === 'NQ' ? '#9333ea' :
+        '#9ca3af'  // couleur par défaut pour CS
+    });
+  }
+}
 
-    // Parcourir lots
+
     lotsResult.data?.forEach((lot: any) => {
       const dayStr = format(new Date(lot.start_time), 'yyyy-MM-dd');
       if (!dateMap.has(dayStr)) {
@@ -901,51 +957,67 @@ const ReportsPage: React.FC = () => {
       }
     });
 
-    // Parcourir stops
-    stopsResult.data?.forEach((stop: any) => {
-      const sTime = new Date(stop.start_time);
-      const eTime = stop.end_time ? new Date(stop.end_time) : new Date();
-      const durMin = Math.max(0, differenceInMinutes(eTime, sTime));
-      const dayStr = format(sTime, 'yyyy-MM-dd');
-      if (!dateMap.has(dayStr)) {
-        dateMap.set(dayStr, {
-          date: dayStr,
-          plannedTime: 0,
-          plannedStops: 0,
-          unplannedStops: 0,
-          netTimeSec: 0,
-          okParts: 0,
-          scrapParts: 0,
-          rework: 0,
-          other: 0,
-          actual: 0,
-          target: 0
-        });
-      }
-      const obj = dateMap.get(dayStr);
-      const hours = durMin / 60;
-      addDowntime(stop.failure_type || 'other', hours);
-      obj.unplannedStops += durMin;
+stopsResult.data?.forEach((stop: any) => {
+  const sTime = new Date(stop.start_time);
+  const eTime = stop.end_time ? new Date(stop.end_time) : new Date();
+  const durMin = Math.max(0, differenceInMinutes(eTime, sTime));
+  const dayStr = format(sTime, 'yyyy-MM-dd');
 
-      if (!stopMap.has(dayStr)) {
-        stopMap.set(dayStr, {
-          date: dayStr,
-          AP: 0, PA: 0, DO: 0, NQ: 0, other: 0
-        });
-      }
-      const stObj = stopMap.get(dayStr);
-      const ft = stop.failure_type || 'other';
-      if (['AP', 'PA', 'DO', 'NQ'].includes(ft)) {
-        stObj[ft] += hours;
-      } else {
-        stObj.other += hours;
-      }
-      if (stop.failure_type === 'PA') {
-        obj.plannedStops += durMin;
-      }
+ if (!dateMap.has(dayStr)) {
+  dateMap.set(dayStr, {
+    date: dayStr,
+    plannedTime: 0,
+    plannedStops: 0,
+    unplannedStops: 0,
+    netTimeSec: 0,
+    okParts: 0,
+    scrapParts: 0,
+    rework: 0,
+    other: 0,
+    actual: 0,
+    target: 0
+  });
+}
+
+  const obj = dateMap.get(dayStr);
+  const hours = durMin / 60;
+
+  // => On doit convertir la failure_type en ft = mapFailureType(...)
+  const ft = mapFailureType(stop.failure_type);
+
+  // 1) Distribution globale (tmpDowntime)
+  addDowntime(ft, hours);
+
+  // 2) Incrémenter unplannedStops
+  obj.unplannedStops += durMin;
+
+  // 3) Mise à jour stopMap
+  if (!stopMap.has(dayStr)) {
+    stopMap.set(dayStr, {
+      date: dayStr,
+      AP: 0, PA: 0, DO: 0, NQ: 0, CS: 0
     });
+  }
+  const stObj = stopMap.get(dayStr);
+  if (ft === 'AP') {
+    stObj.AP += hours;
+  } else if (ft === 'PA') {
+    stObj.PA += hours;
+    obj.plannedStops += durMin;
+  } else if (ft === 'DO') {
+    stObj.DO += hours;
+  } else if (ft === 'NQ') {
+    stObj.NQ += hours;
+  } else {
+    stObj.CS += hours;
+  }
 
-    // Parcourir quality
+  // Optionnel: si stop.failure_type === 'PA', c’est déjà géré ci-dessus,
+  // donc la ligne suivante est peut-être en trop ou à enlever si vous ne la voulez plus en double :
+  // if (stop.failure_type === 'PA') { obj.plannedStops += durMin; }
+});
+
+
     qualityResult.data?.forEach((issue: any) => {
       const dayStr = issue.date;
       if (!dateMap.has(dayStr)) {
@@ -1065,12 +1137,12 @@ const ReportsPage: React.FC = () => {
     const firstPassYield = totalProduction > 0 ? ((totalProduction - totalDefects) / totalProduction) * 100 : 0;
     const scrapRate = totalProduction > 0 ? (totalScrap / totalProduction) * 100 : 0;
 
-    // On renvoie les 4 tableaux + un objet metrics
     return {
       oeeData: tmpOEEData,
       productionData: tmpProdData,
       qualityData: tmpQualityData,
       stopTimeData: tmpStopTime,
+      downtimeData: tmpDowntime, // distribution (pour un donut)
       metrics: {
         oee: avgOEE,
         availability: avgA,
@@ -1116,6 +1188,34 @@ const ReportsPage: React.FC = () => {
     selectedFilters.lines.length > 0 ||
     selectedFilters.products.length > 0 ||
     selectedFilters.teams.length > 0;
+
+  // ------------------- Data "affichée" (avec ou sans comparaison) -------------------
+  // Pour OEE : si showComparison et qu'on a des données fusionnées, on les affiche. Sinon, on affiche le set normal.
+  const displayedOeeData = showComparison && oeeDataMerged.length > 0
+    ? oeeDataMerged
+    : oeeData;
+
+  // Production
+  const displayedProductionData = showComparison && productionComparisonData.length > 0
+    ? productionComparisonData
+    : productionData;
+
+  // Quality
+  const displayedQualityData = showComparison && qualityComparisonData.length > 0
+    ? qualityComparisonData
+    : qualityData;
+
+  // StopTime
+  const displayedStopTimeData = showComparison && stopTimeComparisonData.length > 0
+    ? stopTimeComparisonData
+    : stopTimeData;
+
+  // Downtime => si showComparison, downtimeComparisonData est un tableau [distA, distB]
+  // On passe data={downtimeData} et comparisonData={downtimeComparisonData} au composant.
+  // Le composant gérera un double donut si comparisonData.length === 2
+  // Sinon, on fait un simple donut
+  const displayedDowntimeData = downtimeData; 
+  const displayedDowntimeComparison = downtimeComparisonData; 
 
   // ------------------- Rendu -------------------
   return (
@@ -1278,6 +1378,8 @@ const ReportsPage: React.FC = () => {
                     <span className="text-sm text-green-600">↑ 2.3%</span>
                   </div>
                 </div>
+
+                {/* KPI "normaux" */}
                 <div className="grid grid-cols-3 gap-4 mb-6">
                   <div className="text-center">
                     <div className="text-2xl font-semibold text-gray-900">
@@ -1299,7 +1401,7 @@ const ReportsPage: React.FC = () => {
                   </div>
                 </div>
 
-                {/* KPI comparé */}
+                {/* KPI comparés */}
                 {showComparison && comparisonMetrics && (
                   <div className="grid grid-cols-3 gap-4 mb-6 border-b border-gray-200 pb-4">
                     <div className="text-center">
@@ -1323,9 +1425,9 @@ const ReportsPage: React.FC = () => {
                   </div>
                 )}
 
-                {/* Affichage du graphique OEE avec données fusionnées */}
+                {/* OEEChart : on affiche displayedOeeData */}
                 <OEEChart
-                  data={oeeDataMerged}      // Le tableau fusionné
+                  data={displayedOeeData}
                   showComparison={showComparison}
                 />
               </div>
@@ -1341,6 +1443,8 @@ const ReportsPage: React.FC = () => {
                     <span className="text-sm text-green-600">↑ 5.7%</span>
                   </div>
                 </div>
+
+                {/* KPI "normaux" */}
                 <div className="grid grid-cols-2 gap-4 mb-6">
                   <div>
                     <div className="text-2xl font-semibold text-gray-900">
@@ -1355,10 +1459,35 @@ const ReportsPage: React.FC = () => {
                     <div className="text-sm text-gray-500">Scrap Rate</div>
                   </div>
                 </div>
+
+                {/* KPI comparés */}
+                {showComparison && comparisonMetrics && (
+                  <div className="grid grid-cols-3 gap-4 mb-6 border-b border-gray-200 pb-4">
+                    <div className="text-center">
+                      <div className="text-xs text-gray-400">Comparing Prod.</div>
+                      <div className="text-md font-medium text-blue-600">
+                        {comparisonMetrics.totalProduction.toLocaleString()}
+                      </div>
+                    </div>
+                    <div className="text-center">
+                      <div className="text-xs text-gray-400">Comparing FPY</div>
+                      <div className="text-md font-medium text-blue-600">
+                        {comparisonMetrics.firstPassYield.toFixed(1)}%
+                      </div>
+                    </div>
+                    <div className="text-center">
+                      <div className="text-xs text-gray-400">Comparing Scrap</div>
+                      <div className="text-md font-medium text-blue-600">
+                        {comparisonMetrics.scrapRate.toFixed(1)}%
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* ProductionChart : on affiche displayedProductionData */}
                 <ProductionChart
-                  data={productionData}
+                  data={displayedProductionData}
                   showComparison={showComparison}
-                  comparisonData={productionComparisonData}
                 />
               </div>
 
@@ -1373,9 +1502,24 @@ const ReportsPage: React.FC = () => {
                     <span className="text-sm text-red-600">Stop Time</span>
                   </div>
                 </div>
+
+                {/* KPI comparés */}
+                {showComparison && comparisonMetrics && (
+                  <div className="grid grid-cols-1 gap-4 mb-6 border-b border-gray-200 pb-4">
+                    <div className="text-center">
+                      <div className="text-xs text-gray-400">Comparing Stop Time</div>
+                      <div className="text-md font-medium text-blue-600">
+                        {comparisonMetrics.totalStopTime.toFixed(1)}h
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* DowntimeChart : data=displayedDowntimeData, comparisonData=displayedDowntimeComparison */}
                 <DowntimeChart
-                  data={downtimeData}
-                  showComparison={false}
+                  data={displayedDowntimeData}
+                  showComparison={showComparison}
+                  comparisonData={displayedDowntimeComparison}
                 />
               </div>
 
@@ -1384,16 +1528,30 @@ const ReportsPage: React.FC = () => {
                 <div className="flex items-center justify-between mb-4">
                   <h3 className="text-lg font-medium text-gray-900">Quality Issues</h3>
                   <div className="flex items-center space-x-2">
+                    {/* ex. cumul scrap+rework */}
                     <span className="text-3xl font-bold text-gray-900">
                       {((metrics.scrapRate / 100) * metrics.totalProduction).toFixed(0)}
                     </span>
                     <span className="text-sm text-red-600">Scrap + Rework</span>
                   </div>
                 </div>
+
+                {/* KPI comparés */}
+                {showComparison && comparisonMetrics && (
+                  <div className="grid grid-cols-1 gap-4 mb-6 border-b border-gray-200 pb-4">
+                    <div className="text-center">
+                      <div className="text-xs text-gray-400">Comparing Scrap+Rework</div>
+                      <div className="text-md font-medium text-blue-600">
+                        {((comparisonMetrics.scrapRate / 100) * comparisonMetrics.totalProduction).toFixed(0)}
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* QualityChart : on affiche displayedQualityData */}
                 <QualityChart
-                  data={qualityData}
+                  data={displayedQualityData}
                   showComparison={showComparison}
-                  comparisonData={qualityComparisonData}
                 />
               </div>
             </div>
@@ -1402,9 +1560,8 @@ const ReportsPage: React.FC = () => {
             <div className="bg-white shadow rounded-lg p-6 mt-6">
               <h3 className="text-lg font-medium text-gray-900 mb-4">Stop Time Trend</h3>
               <StopTimeChart
-                data={stopTimeData}
+                data={displayedStopTimeData}
                 showComparison={showComparison}
-                comparisonData={stopTimeComparisonData}
               />
             </div>
           </>
