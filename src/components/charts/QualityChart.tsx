@@ -1,5 +1,14 @@
 import React from 'react';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
+import {
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  Legend,
+  ResponsiveContainer
+} from 'recharts';
 
 interface QualityData {
   date: string;
@@ -22,11 +31,11 @@ interface QualityChartProps {
   comparisonLabel?: string;
 }
 
-const QualityChart: React.FC<QualityChartProps> = ({ 
-  data, 
-  comparisonData, 
-  showComparison = false, 
-  comparisonLabel = 'Previous Period' 
+const QualityChart: React.FC<QualityChartProps> = ({
+  data,
+  comparisonData,
+  showComparison = false,
+  comparisonLabel = 'Previous Period'
 }) => {
   const combinedData = data.map((item, index) => ({
     ...item,
@@ -40,28 +49,26 @@ const QualityChart: React.FC<QualityChartProps> = ({
   const CustomTooltip = ({ active, payload, label }: any) => {
     if (active && payload && payload.length > 0) {
       return (
-        <div className="bg-white p-3 border border-gray-200 shadow-lg rounded-lg">
-          <p className="text-sm font-medium text-gray-900 mb-2">Date: {label}</p>
-          <div className="space-y-1">
-            <p className="text-sm text-yellow-600">
-              Rework: {payload[0].value}
-              {showComparison && payload[3] && (
-                <span className="text-gray-500 ml-2">(prev: {payload[3].value})</span>
-              )}
-            </p>
-            <p className="text-sm text-red-600">
-              Scrap: {payload[1].value}
-              {showComparison && payload[4] && (
-                <span className="text-gray-500 ml-2">(prev: {payload[4].value})</span>
-              )}
-            </p>
-            <p className="text-sm text-gray-600">
-              Other: {payload[2].value}
-              {showComparison && payload[5] && (
-                <span className="text-gray-500 ml-2">(prev: {payload[5].value})</span>
-              )}
-            </p>
-          </div>
+        <div className="bg-white p-3 border border-gray-200 shadow-lg rounded-lg text-sm">
+          <p className="font-medium text-gray-900 mb-2">Date: {label}</p>
+          <p className="text-yellow-600">
+            Rework: {payload[0].value}
+            {showComparison && payload[3] && (
+              <span className="text-gray-500 ml-2">(prev: {payload[3].value})</span>
+            )}
+          </p>
+          <p className="text-red-600">
+            Scrap: {payload[1].value}
+            {showComparison && payload[4] && (
+              <span className="text-gray-500 ml-2">(prev: {payload[4].value})</span>
+            )}
+          </p>
+          <p className="text-gray-600">
+            Other: {payload[2].value}
+            {showComparison && payload[5] && (
+              <span className="text-gray-500 ml-2">(prev: {payload[5].value})</span>
+            )}
+          </p>
         </div>
       );
     }
@@ -76,14 +83,35 @@ const QualityChart: React.FC<QualityChartProps> = ({
         <YAxis />
         <Tooltip content={<CustomTooltip />} />
         <Legend />
+        {/* Empilé pour la période courante */}
         <Bar dataKey="rework" name="Rework" fill="#eab308" stackId="stack" />
         <Bar dataKey="scrap" name="Scrap" fill="#dc2626" stackId="stack" />
         <Bar dataKey="other" name="Other" fill="#9ca3af" stackId="stack" />
+
+        {/* Comparaison empilée */}
         {showComparison && (
           <>
-            <Bar dataKey="rework_prev" name={`Rework (${comparisonLabel})`} fill="#eab308" fillOpacity={0.3} stackId="stack_prev" />
-            <Bar dataKey="scrap_prev" name={`Scrap (${comparisonLabel})`} fill="#dc2626" fillOpacity={0.3} stackId="stack_prev" />
-            <Bar dataKey="other_prev" name={`Other (${comparisonLabel})`} fill="#9ca3af" fillOpacity={0.3} stackId="stack_prev" />
+            <Bar
+              dataKey="rework_prev"
+              name={`Rework (${comparisonLabel})`}
+              fill="#eab308"
+              fillOpacity={0.3}
+              stackId="stack_prev"
+            />
+            <Bar
+              dataKey="scrap_prev"
+              name={`Scrap (${comparisonLabel})`}
+              fill="#dc2626"
+              fillOpacity={0.3}
+              stackId="stack_prev"
+            />
+            <Bar
+              dataKey="other_prev"
+              name={`Other (${comparisonLabel})`}
+              fill="#9ca3af"
+              fillOpacity={0.3}
+              stackId="stack_prev"
+            />
           </>
         )}
       </BarChart>

@@ -1,6 +1,15 @@
+// src/pages/project/reports/index.tsx
+
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { format, subDays, startOfToday, startOfYesterday, differenceInMinutes } from 'date-fns';
+import {
+  format,
+  subDays,
+  startOfToday,
+  startOfYesterday,
+  differenceInMinutes
+} from 'date-fns';
+
 import {
   Calendar,
   Download,
@@ -12,7 +21,8 @@ import {
   Package,
   AlertTriangle,
   Clock,
-  ChevronRight
+  ChevronRight,
+  X,
 } from 'lucide-react';
 
 import { supabase } from '../../../lib/supabase';
@@ -21,14 +31,16 @@ import ProjectLayout from '../../../components/layout/ProjectLayout';
 // Charts
 import OEEChart from '../../../components/charts/OEEChart';
 import ProductionChart from '../../../components/charts/ProductionChart';
-import DowntimeChart from '../../../components/charts/DowntimeChart';
 import QualityChart from '../../../components/charts/QualityChart';
+import DowntimeChart from '../../../components/charts/DowntimeChart';
+import StopTimeChart from '../../../components/charts/StopTimeChart';
 
 // Filters / Comparison
 import ComparisonModal from '../../../components/reports/ComparisonModal';
 import ComparisonSelector from '../../../components/reports/ComparisonSelector';
 import FilterPanel from '../../../components/reports/FilterPanel';
 
+// ------------------- Types et interfaces -------------------
 interface Metrics {
   oee: number;
   availability: number;
@@ -37,16 +49,18 @@ interface Metrics {
   totalProduction: number;
   firstPassYield: number;
   scrapRate: number;
+  totalStopTime: number;
 }
 
 type PeriodType = 'today' | 'yesterday' | 'week' | 'month' | 'quarter';
 
-function mergeComparisonData(dataA: any[], dataB: any[]) {
-  // Fusionne par date (même si les séries ne sont pas de même longueur)
+// ------------------- Fonctions de merge -------------------
+function mergeOEEData(dataA: any[], dataB: any[]) {
   const allDates = new Set([...dataA.map(d => d.date), ...dataB.map(d => d.date)]);
   const mapA = new Map(dataA.map(d => [d.date, d]));
   const mapB = new Map(dataB.map(d => [d.date, d]));
   const merged: any[] = [];
+
   allDates.forEach(date => {
     const rowA = mapA.get(date) || {};
     const rowB = mapB.get(date) || {};
@@ -62,23 +76,108 @@ function mergeComparisonData(dataA: any[], dataB: any[]) {
       quality_prev: rowB.quality ?? 0
     });
   });
-  return Array.from(merged).sort((a, b) => (a.date < b.date ? -1 : 1));
+
+  return merged.sort((a, b) => (a.date < b.date ? -1 : 1));
 }
 
+function mergeProductionData(dataA: any[], dataB: any[]) {
+  const allDates = new Set([...dataA.map(d => d.date), ...dataB.map(d => d.date)]);
+  const mapA = new Map(dataA.map(d => [d.date, d]));
+  const mapB = new Map(dataB.map(d => [d.date, d]));
+  const merged: any[] = [];
+
+  allDates.forEach(date => {
+    const rowA = mapA.get(date) || {};
+    const rowB = mapB.get(date) || {};
+    merged.push({
+      date,
+      actual: rowA.actual ?? 0,
+      target: rowA.target ?? 0,
+      scrap: rowA.scrap ?? 0,
+      actual_prev: rowB.actual ?? 0,
+      target_prev: rowB.target ?? 0,
+      scrap_prev: rowB.scrap ?? 0
+    });
+  });
+
+  return merged.sort((a, b) => (a.date < b.date ? -1 : 1));
+}
+
+function mergeQualityData(dataA: any[], dataB: any[]) {
+  const allDates = new Set([...dataA.map(d => d.date), ...dataB.map(d => d.date)]);
+  const mapA = new Map(dataA.map(d => [d.date, d]));
+  const mapB = new Map(dataB.map(d => [d.date, d]));
+  const merged: any[] = [];
+
+  allDates.forEach(date => {
+    const rowA = mapA.get(date) || {};
+    const rowB = mapB.get(date) || {};
+    merged.push({
+      date,
+      rework: rowA.rework ?? 0,
+      scrap: rowA.scrap ?? 0,
+      other: rowA.other ?? 0,
+      rework_prev: rowB.rework ?? 0,
+      scrap_prev: rowB.scrap ?? 0,
+      other_prev: rowB.other ?? 0
+    });
+  });
+
+  return merged.sort((a, b) => (a.date < b.date ? -1 : 1));
+}
+
+function mergeStopTimeData(dataA: any[], dataB: any[]) {
+  const allDates = new Set([...dataA.map(d => d.date), ...dataB.map(d => d.date)]);
+  const mapA = new Map(dataA.map(d => [d.date, d]));
+  const mapB = new Map(dataB.map(d => [d.date, d]));
+  const merged: any[] = [];
+
+  allDates.forEach(date => {
+    const rowA = mapA.get(date) || {};
+    const rowB = mapB.get(date) || {};
+    merged.push({
+      date,
+      AP: rowA.AP ?? 0,
+      PA: rowA.PA ?? 0,
+      DO: rowA.DO ?? 0,
+      NQ: rowA.NQ ?? 0,
+      other: rowA.other ?? 0,
+      AP_prev: rowB.AP ?? 0,
+      PA_prev: rowB.PA ?? 0,
+      DO_prev: rowB.DO ?? 0,
+      NQ_prev: rowB.NQ ?? 0,
+      other_prev: rowB.other ?? 0
+    });
+  });
+
+  return merged.sort((a, b) => (a.date < b.date ? -1 : 1));
+}
+
+// ------------------- Composant principal -------------------
 const ReportsPage: React.FC = () => {
   const { projectId } = useParams<{ projectId: string }>();
   const navigate = useNavigate();
 
-  // Période sélectionnée
+  // ------------------- États -------------------
+  // Période
   const [selectedPeriod, setSelectedPeriod] = useState<PeriodType>('week');
   const [showPeriodDropdown, setShowPeriodDropdown] = useState(false);
 
   // Comparaison
   const [showCompareModal, setShowCompareModal] = useState(false);
   const [showComparisonSelector, setShowComparisonSelector] = useState(false);
-  const [comparisonType, setComparisonType] = useState<string>('');
+  const [comparisonType, setComparisonType] = useState<string>('machines');
   const [showComparison, setShowComparison] = useState(false);
-  const [comparisonData, setComparisonData] = useState<any[]>([]);
+
+  // Données de comparaison
+  const [oeeComparisonData, setOeeComparisonData] = useState<any[]>([]);
+  const [productionComparisonData, setProductionComparisonData] = useState<any[]>([]);
+  const [qualityComparisonData, setQualityComparisonData] = useState<any[]>([]);
+  const [stopTimeComparisonData, setStopTimeComparisonData] = useState<any[]>([]);
+  const [comparisonMetrics, setComparisonMetrics] = useState<Metrics | null>(null);
+
+  // Tableau fusionné pour OEE
+  const [oeeDataMerged, setOeeDataMerged] = useState<any[]>([]);
 
   // Filtres
   const [showFilterPanel, setShowFilterPanel] = useState(false);
@@ -95,16 +194,19 @@ const ReportsPage: React.FC = () => {
     teams: [] as string[]
   });
 
-  // Chargement / Erreur
+  // État chargement / erreur
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string|null>(null);
+  const [error, setError] = useState<string | null>(null);
   const [hasData, setHasData] = useState(false);
 
-  // Données des graphiques et indicateurs
+  // Données charts (hors comparaison)
   const [oeeData, setOeeData] = useState<any[]>([]);
   const [productionData, setProductionData] = useState<any[]>([]);
-  const [downtimeData, setDowntimeData] = useState<any[]>([]);
   const [qualityData, setQualityData] = useState<any[]>([]);
+  const [stopTimeData, setStopTimeData] = useState<any[]>([]);
+  const [downtimeData, setDowntimeData] = useState<any[]>([]);
+
+  // KPI
   const [metrics, setMetrics] = useState<Metrics>({
     oee: 0,
     availability: 0,
@@ -112,9 +214,11 @@ const ReportsPage: React.FC = () => {
     quality: 0,
     totalProduction: 0,
     firstPassYield: 0,
-    scrapRate: 0
+    scrapRate: 0,
+    totalStopTime: 0
   });
 
+  // ------------------- useEffect -------------------
   useEffect(() => {
     if (projectId) {
       loadFilterOptions();
@@ -122,7 +226,8 @@ const ReportsPage: React.FC = () => {
     }
   }, [projectId, selectedPeriod, selectedFilters]);
 
-  const getDateRange = () => {
+  // ------------------- Fonctions internes -------------------
+  function getDateRange() {
     const now = new Date();
     switch (selectedPeriod) {
       case 'today':
@@ -137,47 +242,84 @@ const ReportsPage: React.FC = () => {
       default:
         return { startDate: subDays(now, 90), endDate: now };
     }
-  };
+  }
 
-  // Helpers pour convertir noms → UUID
-  const getMachineIdsByName = async (names: string[]): Promise<string[]> => {
+  function clearComparison() {
+    setShowComparison(false);
+    setOeeComparisonData([]);
+    setProductionComparisonData([]);
+    setQualityComparisonData([]);
+    setStopTimeComparisonData([]);
+    setComparisonMetrics(null);
+    setOeeDataMerged([]); // on vide le merged
+  }
+
+  // Helpers pour récupérer des IDs en fonction des noms
+  async function getMachineIdsByName(names: string[]): Promise<string[]> {
     if (!names.length) return [];
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (names.every(n => uuidRegex.test(n))) {
+      return names;
+    }
     const { data, error } = await supabase
       .from('machines')
       .select('id, name')
       .eq('project_id', projectId)
       .in('name', names);
     if (error) {
-      console.error('Error in getMachineIdsByName:', error);
+      console.error('getMachineIdsByName error:', error);
       return [];
     }
-    return data?.map(m => m.id) || [];
-  };
+    return data?.map((m: any) => m.id) || [];
+  }
 
-  const getProductIdsByName = async (names: string[]): Promise<string[]> => {
+  async function getProductIdsByName(names: string[]): Promise<string[]> {
     if (!names.length) return [];
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from('products')
       .select('id, name')
       .eq('project_id', projectId)
       .in('name', names);
-    return data?.map(p => p.id) || [];
-  };
+    if (error) {
+      console.error('getProductIdsByName error:', error);
+      return [];
+    }
+    return data?.map((p: any) => p.id) || [];
+  }
 
-  const getTeamMemberIdsByTeamName = async (names: string[]): Promise<string[]> => {
+  async function getTeamMemberIdsByTeamName(names: string[]): Promise<string[]> {
     if (!names.length) return [];
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from('team_members')
       .select('id, team_name')
       .eq('project_id', projectId)
       .in('team_name', names);
-    return data?.map(t => t.id) || [];
-  };
+    if (error) {
+      console.error('getTeamMemberIdsByTeamName error:', error);
+      return [];
+    }
+    return data?.map((t: any) => t.id) || [];
+  }
 
-  const loadFilterOptions = async () => {
+  async function getLineIdsByName(names: string[]): Promise<string[]> {
+    if (!names.length) return [];
+    const { data, error } = await supabase
+      .from('production_lines')
+      .select('id, name')
+      .eq('project_id', projectId)
+      .in('name', names);
+    if (error) {
+      console.error('getLineIdsByName error:', error);
+      return [];
+    }
+    return data?.map((l: any) => l.id) || [];
+  }
+
+  // ------------------- loadFilterOptions -------------------
+  async function loadFilterOptions() {
     if (!projectId) return;
     try {
-      const [machRes, linesRes, prodRes, teamsRes] = await Promise.all([
+      const [machRes, lineRes, prodRes, teamRes] = await Promise.all([
         supabase.from('machines').select('id, name').eq('project_id', projectId),
         supabase.from('production_lines').select('id, name').eq('project_id', projectId),
         supabase.from('products').select('id, name').eq('project_id', projectId),
@@ -185,23 +327,24 @@ const ReportsPage: React.FC = () => {
       ]);
 
       setFilterOptions({
-        machines: Array.from(new Set(machRes.data?.map(m => m.name) || [])),
-        lines: Array.from(new Set(linesRes.data?.map(l => l.name) || [])),
-        products: Array.from(new Set(prodRes.data?.map(p => p.name) || [])),
-        teams: Array.from(new Set(teamsRes.data?.map(t => t.team_name) || []))
+        machines: Array.from(new Set(machRes.data?.map((m: any) => m.name) || [])),
+        lines: Array.from(new Set(lineRes.data?.map((l: any) => l.name) || [])),
+        products: Array.from(new Set(prodRes.data?.map((p: any) => p.name) || [])),
+        teams: Array.from(new Set(teamRes.data?.map((t: any) => t.team_name) || []))
       });
     } catch (err) {
       console.error('Error loading filter options:', err);
     }
-  };
+  }
 
-  const loadData = async () => {
+  // ------------------- loadData (pour charts "normaux") -------------------
+  async function loadData() {
     if (!projectId) return;
     try {
       setLoading(true);
       setError(null);
 
-      // Vérifier les lots
+      // Vérifier la présence de lots
       const { count, error: countError } = await supabase
         .from('lots')
         .select('*', { count: 'exact', head: true })
@@ -214,40 +357,27 @@ const ReportsPage: React.FC = () => {
       }
       setHasData(true);
 
+      // Déterminer la plage de dates
       const { startDate, endDate } = getDateRange();
 
-      // Requête sur les lots (utiliser start_time pour filtrer)
+      // Préparer les requêtes
       let lotsQuery = supabase
         .from('lots')
         .select(`
           id,
           start_time,
           end_time,
-          ok_parts_produced,
-          lot_size,
           machine,
           product,
           team_member,
+          lot_size,
+          ok_parts_produced,
           products:product ( cycle_time )
         `)
         .eq('project_id', projectId)
         .gte('start_time', startDate.toISOString())
         .lte('start_time', endDate.toISOString());
 
-      if (selectedFilters.machines.length > 0) {
-        const machineIDs = await getMachineIdsByName(selectedFilters.machines);
-        lotsQuery = lotsQuery.in('machine', machineIDs);
-      }
-      if (selectedFilters.products.length > 0) {
-        const productIDs = await getProductIdsByName(selectedFilters.products);
-        lotsQuery = lotsQuery.in('product', productIDs);
-      }
-      if (selectedFilters.teams.length > 0) {
-        const teamIDs = await getTeamMemberIdsByTeamName(selectedFilters.teams);
-        lotsQuery = lotsQuery.in('team_member', teamIDs);
-      }
-
-      // Requête sur stop_events
       let stopsQuery = supabase
         .from('stop_events')
         .select(`
@@ -255,36 +385,73 @@ const ReportsPage: React.FC = () => {
           start_time,
           end_time,
           machine,
+          product,
+          team_member,
           failure_type
         `)
         .eq('project_id', projectId)
         .gte('start_time', startDate.toISOString())
         .lte('start_time', endDate.toISOString());
-      if (selectedFilters.machines.length > 0) {
-        const machineIDs = await getMachineIdsByName(selectedFilters.machines);
-        stopsQuery = stopsQuery.in('machine', machineIDs);
-      }
-      // Si vous avez des colonnes product/team dans stop_events, appliquez-les de la même façon.
 
-      // Requête sur quality_issues
       let qualityQuery = supabase
         .from('quality_issues')
         .select(`
           id,
           machine,
+          product,
+          team_member,
+          date,
           category,
-          quantity,
-          date
+          quantity
         `)
         .eq('project_id', projectId)
         .gte('date', format(startDate, 'yyyy-MM-dd'))
         .lte('date', format(endDate, 'yyyy-MM-dd'));
+
+      // Appliquer les filtres
+      let finalMachineIDs: string[] = [];
+      if (selectedFilters.lines.length > 0) {
+        const lineIDs = await getLineIdsByName(selectedFilters.lines);
+        if (lineIDs.length > 0) {
+          const { data: machOfLines } = await supabase
+            .from('machines')
+            .select('id, line_id')
+            .eq('project_id', projectId)
+            .in('line_id', lineIDs);
+          if (machOfLines) {
+            const lineMachineIDs = machOfLines.map((m: any) => m.id);
+            finalMachineIDs = [...finalMachineIDs, ...lineMachineIDs];
+          }
+        }
+      }
       if (selectedFilters.machines.length > 0) {
         const machineIDs = await getMachineIdsByName(selectedFilters.machines);
-        qualityQuery = qualityQuery.in('machine', machineIDs);
+        finalMachineIDs = [...finalMachineIDs, ...machineIDs];
       }
-      // Idem pour products ou teams si ces colonnes existent dans quality_issues.
+      finalMachineIDs = Array.from(new Set(finalMachineIDs));
+      if (finalMachineIDs.length > 0) {
+        lotsQuery.in('machine', finalMachineIDs);
+        stopsQuery.in('machine', finalMachineIDs);
+        qualityQuery.in('machine', finalMachineIDs);
+      }
+      if (selectedFilters.products.length > 0) {
+        const productIDs = await getProductIdsByName(selectedFilters.products);
+        if (productIDs.length > 0) {
+          lotsQuery.in('product', productIDs);
+          stopsQuery.in('product', productIDs);
+          qualityQuery.in('product', productIDs);
+        }
+      }
+      if (selectedFilters.teams.length > 0) {
+        const teamIDs = await getTeamMemberIdsByTeamName(selectedFilters.teams);
+        if (teamIDs.length > 0) {
+          lotsQuery.in('team_member', teamIDs);
+          stopsQuery.in('team_member', teamIDs);
+          qualityQuery.in('team_member', teamIDs);
+        }
+      }
 
+      // Exécuter les requêtes
       const [lotsResult, stopsResult, qualityResult] = await Promise.all([
         lotsQuery,
         stopsQuery,
@@ -294,19 +461,35 @@ const ReportsPage: React.FC = () => {
       if (stopsResult.error) throw stopsResult.error;
       if (qualityResult.error) throw qualityResult.error;
 
-      // Préparation du calcul par jour
+      // Construction des données
       const dateMap = new Map<string, any>();
+      const stopMap = new Map<string, any>();
+      const tmpDowntime: any[] = [];
 
+      function addDowntime(type: string, hours: number) {
+        const found = tmpDowntime.find(x => x.name === type);
+        if (found) found.value += hours;
+        else {
+          tmpDowntime.push({
+            name: type,
+            value: hours,
+            color:
+              type === 'AP' ? '#2563eb' :
+              type === 'PA' ? '#dc2626' :
+              type === 'DO' ? '#eab308' :
+              type === 'NQ' ? '#9333ea' :
+              '#9ca3af'
+          });
+        }
+      }
+
+      // 1) Parcourir lots
       lotsResult.data?.forEach((lot: any) => {
         const dayStr = format(new Date(lot.start_time), 'yyyy-MM-dd');
         if (!dateMap.has(dayStr)) {
           dateMap.set(dayStr, {
             date: dayStr,
-            // PlannedProductionTime = (end_time - start_time) - (durée des arrêts planifiés)
             plannedTime: 0,
-            // RunTime = (end_time - start_time) - (tous les arrêts)
-            runTime: 0,
-            // On stocke aussi les durées d'arrêts planifiés et non planifiés
             plannedStops: 0,
             unplannedStops: 0,
             netTimeSec: 0,
@@ -318,37 +501,36 @@ const ReportsPage: React.FC = () => {
             target: 0
           });
         }
-        const data = dateMap.get(dayStr);
+        const obj = dateMap.get(dayStr);
         const st = new Date(lot.start_time);
-        // Si le lot est toujours en cours, on considère end_time = now
         const et = lot.end_time ? new Date(lot.end_time) : new Date();
-        const lotDuration = Math.max(0, differenceInMinutes(et, st));
-        // Pour PlannedProductionTime, on ne retire que les arrêts planifiés (ex. failure_type === 'PA')
-        data.plannedTime += lotDuration;
-        // Pour RunTime, nous soustrairons tous les arrêts (calculé ultérieurement)
-        // NetTimeSec = ok_parts_produced * cycle_time (en secondes)
+        const durMin = Math.max(0, differenceInMinutes(et, st));
+        obj.plannedTime += durMin;
+
         if (lot.products?.cycle_time && lot.ok_parts_produced > 0) {
-          data.netTimeSec += lot.ok_parts_produced * lot.products.cycle_time;
+          obj.netTimeSec += (lot.ok_parts_produced * lot.products.cycle_time);
         }
-        data.okParts += lot.ok_parts_produced;
-        data.actual += lot.ok_parts_produced;
-        if (lot.lot_size) {
-          // Partial target calculé sur le ratio écoulé du lot
+        obj.okParts += lot.ok_parts_produced;
+        obj.actual += lot.ok_parts_produced;
+
+        if (lot.lot_size > 0 && durMin > 0) {
           const now = new Date();
           const elapsed = differenceInMinutes(now > et ? et : now, st);
-          const ratio = Math.min(elapsed / lotDuration, 1);
-          data.target += Math.round(ratio * lot.lot_size);
+          const ratio = Math.min(elapsed / durMin, 1);
+          obj.target += Math.round(ratio * lot.lot_size);
         }
       });
 
-      // Traiter les stops
+      // 2) Parcourir stops
       stopsResult.data?.forEach((stop: any) => {
-        const dayStr = format(new Date(stop.start_time), 'yyyy-MM-dd');
+        const sTime = new Date(stop.start_time);
+        const eTime = stop.end_time ? new Date(stop.end_time) : new Date();
+        const durMin = Math.max(0, differenceInMinutes(eTime, sTime));
+        const dayStr = format(sTime, 'yyyy-MM-dd');
         if (!dateMap.has(dayStr)) {
           dateMap.set(dayStr, {
             date: dayStr,
             plannedTime: 0,
-            runTime: 0,
             plannedStops: 0,
             unplannedStops: 0,
             netTimeSec: 0,
@@ -360,27 +542,36 @@ const ReportsPage: React.FC = () => {
             target: 0
           });
         }
-        const data = dateMap.get(dayStr);
-        const sTime = new Date(stop.start_time);
-        const eTime = stop.end_time ? new Date(stop.end_time) : new Date();
-        const stopDuration = Math.max(0, differenceInMinutes(eTime, sTime));
-        // Pour RunTime, tous les arrêts sont retirés
-        // Pour PlannedProductionTime, on retire seulement les arrêts planifiés
-        if (stop.failure_type === 'PA') {
-          data.plannedStops += stopDuration;
+        const obj = dateMap.get(dayStr);
+        const hours = durMin / 60;
+        addDowntime(stop.failure_type || 'other', hours);
+        obj.unplannedStops += durMin;
+
+        if (!stopMap.has(dayStr)) {
+          stopMap.set(dayStr, {
+            date: dayStr,
+            AP: 0, PA: 0, DO: 0, NQ: 0, other: 0
+          });
+        }
+        const stObj = stopMap.get(dayStr);
+        const ft = stop.failure_type || 'other';
+        if (['AP', 'PA', 'DO', 'NQ'].includes(ft)) {
+          stObj[ft] += hours;
         } else {
-          data.unplannedStops += stopDuration;
+          stObj.other += hours;
+        }
+        if (stop.failure_type === 'PA') {
+          obj.plannedStops += durMin;
         }
       });
 
-      // Traiter les quality issues pour récupérer le scrap
+      // 3) Parcourir quality
       qualityResult.data?.forEach((issue: any) => {
         const dayStr = issue.date;
         if (!dateMap.has(dayStr)) {
           dateMap.set(dayStr, {
             date: dayStr,
             plannedTime: 0,
-            runTime: 0,
             plannedStops: 0,
             unplannedStops: 0,
             netTimeSec: 0,
@@ -392,37 +583,35 @@ const ReportsPage: React.FC = () => {
             target: 0
           });
         }
-        const data = dateMap.get(dayStr);
+        const obj = dateMap.get(dayStr);
         if (issue.category === 'scrap') {
-          data.scrapParts += issue.quantity;
+          obj.scrapParts += issue.quantity;
         } else if (issue.category.includes('rework')) {
-          data.rework += issue.quantity;
+          obj.rework += issue.quantity;
         } else {
-          data.other += issue.quantity;
+          obj.other += issue.quantity;
         }
       });
 
-      // Calcul final par jour
+      // 4) Calcul final
       const tmpOEEData: any[] = [];
       const tmpProdData: any[] = [];
       const tmpQualityData: any[] = [];
-
+      const tmpStopTime: any[] = [];
       let dayCount = 0;
       let sumA = 0, sumP = 0, sumQ = 0, sumOEE = 0;
       let globalOk = 0, globalScrap = 0, globalDefects = 0;
+      let totalStopHours = 0;
 
-      const allDays = Array.from(dateMap.values()).sort((a, b) => a.date < b.date ? -1 : 1);
-      allDays.forEach(d => {
-        // RunTime = (lot duration) - (tous les arrêts)
-        const runTime = Math.max(0, d.plannedTime - (d.plannedStops + d.unplannedStops));
-        // Planned Production Time = (lot duration) - (arrêts planifiés)
+      const allDates = Array.from(dateMap.values()).sort((a, b) => (a.date < b.date ? -1 : 1));
+      allDates.forEach(d => {
         const plannedProdTime = Math.max(0, d.plannedTime - d.plannedStops);
-        // Pour Availability : si plannedProdTime > 0, A = runTime / plannedProdTime * 100
+        const runTime = Math.max(0, d.plannedTime - d.unplannedStops);
+
         let A = 0;
         if (plannedProdTime > 0) {
           A = (runTime / plannedProdTime) * 100;
         }
-        // Pour Performance : NetTime = okParts * cycle_time + scrapParts * (cycle_time moyen)
         let netSec = d.netTimeSec;
         const totParts = d.okParts + d.scrapParts;
         if (d.okParts > 0 && d.scrapParts > 0) {
@@ -435,22 +624,16 @@ const ReportsPage: React.FC = () => {
           P = (netMin / runTime) * 100;
           if (P > 100) P = 100;
         }
-        // Qualité = okParts / (okParts + scrapParts)
         let Q = 100;
         if (totParts > 0) {
           Q = (d.okParts / totParts) * 100;
         }
-        // OEE = (A * P * Q) / 1,000,000 * 100
-        const OEE = ((A * P * Q) / 1000000) * 100;
-
-        d.availability = A;
-        d.performance = P;
-        d.quality = Q;
-        d.oee = OEE;
+        const OEEfrac = (A * P * Q) / 1000000;
+        const OEEpct = OEEfrac * 100;
 
         tmpOEEData.push({
           date: d.date,
-          oee: OEE,
+          oee: OEEpct,
           availability: A,
           performance: P,
           quality: Q
@@ -469,40 +652,25 @@ const ReportsPage: React.FC = () => {
         });
 
         if (totParts > 0) {
+          dayCount++;
           sumA += A;
           sumP += P;
           sumQ += Q;
-          sumOEE += OEE;
-          dayCount++;
+          sumOEE += OEEpct;
         }
         globalOk += d.okParts;
         globalScrap += d.scrapParts;
         globalDefects += (d.scrapParts + d.rework + d.other);
       });
 
-      // Downtime distribution (pour le pie chart)
-      const tmpDowntime = stopsResult.data?.reduce((acc: any, stop: any) => {
-        const sTime = new Date(stop.start_time);
-        const eTime = stop.end_time ? new Date(stop.end_time) : new Date();
-        const durH = (eTime.getTime() - sTime.getTime()) / (1000 * 60 * 60);
-        const type = stop.failure_type || 'Unknown';
-        const existing = acc.find((x: any) => x.name === type);
-        if (existing) {
-          existing.value += durH;
-        } else {
-          acc.push({
-            name: type,
-            value: durH,
-            color:
-              type === 'AP' ? '#2563eb' :
-              type === 'PA' ? '#dc2626' :
-              type === 'DO' ? '#eab308' :
-              type === 'NQ' ? '#9333ea' :
-              '#16a34a'
-          });
-        }
-        return acc;
-      }, []);
+      const allStopDates = Array.from(stopMap.values()).sort((a, b) => (a.date < b.date ? -1 : 1));
+      allStopDates.forEach(s => {
+        tmpStopTime.push(s);
+      });
+
+      tmpDowntime.forEach(d => {
+        totalStopHours += d.value;
+      });
 
       let avgA = 0, avgP = 0, avgQ = 0, avgOEE = 0;
       if (dayCount > 0) {
@@ -517,10 +685,12 @@ const ReportsPage: React.FC = () => {
       const firstPassYield = totalProduction > 0 ? ((totalProduction - totalDefects) / totalProduction) * 100 : 0;
       const scrapRate = totalProduction > 0 ? (totalScrap / totalProduction) * 100 : 0;
 
+      // Stocker dans le state
       setOeeData(tmpOEEData);
       setProductionData(tmpProdData);
       setQualityData(tmpQualityData);
-      setDowntimeData(tmpDowntime || []);
+      setStopTimeData(tmpStopTime);
+      setDowntimeData(tmpDowntime);
 
       setMetrics({
         oee: avgOEE,
@@ -529,7 +699,8 @@ const ReportsPage: React.FC = () => {
         quality: avgQ,
         totalProduction,
         firstPassYield,
-        scrapRate
+        scrapRate,
+        totalStopTime: totalStopHours
       });
 
       setLoading(false);
@@ -538,166 +709,388 @@ const ReportsPage: React.FC = () => {
       setError(err instanceof Error ? err.message : 'Failed to load data');
       setLoading(false);
     }
-  };
+  }
 
-  // Comparaison : sélection du type et chargement de data pour comparaison
-  const handleComparisonSelect = (type: string) => {
+  // ------------------- Comparaison -------------------
+  function handleComparisonSelect(type: string) {
     setComparisonType(type);
     setShowCompareModal(false);
     setShowComparisonSelector(true);
-  };
+  }
 
-  const handleComparisonItems = async (items: string[]) => {
+  // 1) handleComparisonItems => appelle loadComparisonData pour chaque item, puis fusionne
+  async function handleComparisonItems(items: string[]) {
     setShowComparisonSelector(false);
     setShowComparison(true);
-    // Par exemple, items contiendra les noms de 2 machines
-    const dataA = await loadComparisonDataForMachine(items[0]);
-    const dataB = await loadComparisonDataForMachine(items[1]);
-    const merged = mergeComparisonData(dataA, dataB);
-    setComparisonData(merged);
-  };
 
-  const loadComparisonDataForMachine = async (machineName: string) => {
-    // On convertit le nom en ID
-    const [machineId] = await getMachineIdsByName([machineName]);
-    if (!machineId) return [];
+    if (items.length < 2) {
+      return;
+    }
+
+    // Charger dataA
+    const dataA = await loadComparisonData(items[0]);
+    // Charger dataB
+    const dataB = await loadComparisonData(items[1]);
+
+    // Fusion OEE
+    const mergedOEE = mergeOEEData(dataA.oeeData, dataB.oeeData);
+    setOeeDataMerged(mergedOEE);
+
+    // Fusion Production
+    const mergedProd = mergeProductionData(dataA.productionData, dataB.productionData);
+    setProductionComparisonData(mergedProd);
+
+    // Fusion Quality
+    const mergedQual = mergeQualityData(dataA.qualityData, dataB.qualityData);
+    setQualityComparisonData(mergedQual);
+
+    // Fusion StopTime
+    const mergedStop = mergeStopTimeData(dataA.stopTimeData, dataB.stopTimeData);
+    setStopTimeComparisonData(mergedStop);
+
+    // Mettre à jour les KPI de comparaison (ici on récupère ceux de dataB, mais à vous de décider)
+    setComparisonMetrics(dataB.metrics);
+  }
+
+  // 2) loadComparisonData => charge depuis Supabase la data “comparaison” pour un seul item (ici, une machine)
+  async function loadComparisonData(itemName: string) {
+    // 2.1) Récup l'ID de la machine (ou adaptez si vous comparez lines, products, etc.)
+    const machineIDs = await getMachineIdsByName([itemName]);
+    if (!machineIDs.length) {
+      console.log(`[loadComparisonData] No machine found for itemName=${itemName}`);
+      // On renvoie des arrays vides
+      return {
+        oeeData: [],
+        productionData: [],
+        qualityData: [],
+        stopTimeData: [],
+        metrics: {
+          oee: 0,
+          availability: 0,
+          performance: 0,
+          quality: 0,
+          totalProduction: 0,
+          firstPassYield: 0,
+          scrapRate: 0,
+          totalStopTime: 0
+        }
+      };
+    }
+
+    // 2.2) Utiliser la même plage de dates que loadData
     const { startDate, endDate } = getDateRange();
-    const lotsRes = await supabase
+
+    // 2.3) Construire les requêtes
+    let lotsQuery = supabase
       .from('lots')
       .select(`
         id,
         start_time,
         end_time,
-        ok_parts_produced,
+        machine,
+        product,
+        team_member,
         lot_size,
+        ok_parts_produced,
         products:product ( cycle_time )
       `)
       .eq('project_id', projectId)
-      .eq('machine', machineId)
+      .in('machine', machineIDs)
       .gte('start_time', startDate.toISOString())
       .lte('start_time', endDate.toISOString());
-    const stopsRes = await supabase
+
+    let stopsQuery = supabase
       .from('stop_events')
       .select(`
+        id,
         start_time,
         end_time,
+        machine,
+        product,
+        team_member,
         failure_type
       `)
       .eq('project_id', projectId)
-      .eq('machine', machineId)
+      .in('machine', machineIDs)
       .gte('start_time', startDate.toISOString())
       .lte('start_time', endDate.toISOString());
-    const qualityRes = await supabase
+
+    let qualityQuery = supabase
       .from('quality_issues')
       .select(`
+        id,
+        machine,
+        product,
+        team_member,
+        date,
         category,
-        quantity,
-        date
+        quantity
       `)
       .eq('project_id', projectId)
-      .eq('machine', machineId)
+      .in('machine', machineIDs)
       .gte('date', format(startDate, 'yyyy-MM-dd'))
       .lte('date', format(endDate, 'yyyy-MM-dd'));
-    if (lotsRes.error || stopsRes.error || qualityRes.error) return [];
+
+    // 2.4) Exécuter
+    const [lotsResult, stopsResult, qualityResult] = await Promise.all([
+      lotsQuery,
+      stopsQuery,
+      qualityQuery
+    ]);
+    if (lotsResult.error) throw lotsResult.error;
+    if (stopsResult.error) throw stopsResult.error;
+    if (qualityResult.error) throw qualityResult.error;
+
+    // 2.5) Même logique que loadData pour calculer oeeData, productionData, qualityData, stopTimeData
     const dateMap = new Map<string, any>();
-    lotsRes.data?.forEach((lot: any) => {
+    const stopMap = new Map<string, any>();
+    const tmpDowntime: any[] = [];
+
+    function addDowntime(type: string, hours: number) {
+      const found = tmpDowntime.find(x => x.name === type);
+      if (found) found.value += hours;
+      else {
+        tmpDowntime.push({
+          name: type,
+          value: hours,
+          color:
+            type === 'AP' ? '#2563eb' :
+            type === 'PA' ? '#dc2626' :
+            type === 'DO' ? '#eab308' :
+            type === 'NQ' ? '#9333ea' :
+            '#9ca3af'
+        });
+      }
+    }
+
+    // Parcourir lots
+    lotsResult.data?.forEach((lot: any) => {
       const dayStr = format(new Date(lot.start_time), 'yyyy-MM-dd');
       if (!dateMap.has(dayStr)) {
         dateMap.set(dayStr, {
           date: dayStr,
           plannedTime: 0,
-          unplanned: 0,
+          plannedStops: 0,
+          unplannedStops: 0,
           netTimeSec: 0,
           okParts: 0,
-          scrapParts: 0
+          scrapParts: 0,
+          rework: 0,
+          other: 0,
+          actual: 0,
+          target: 0
         });
       }
       const obj = dateMap.get(dayStr);
       const st = new Date(lot.start_time);
       const et = lot.end_time ? new Date(lot.end_time) : new Date();
-      const durMin = differenceInMinutes(et, st);
-      obj.plannedTime += Math.max(0, durMin);
+      const durMin = Math.max(0, differenceInMinutes(et, st));
+      obj.plannedTime += durMin;
+
       if (lot.products?.cycle_time && lot.ok_parts_produced > 0) {
-        obj.netTimeSec += lot.ok_parts_produced * lot.products.cycle_time;
+        obj.netTimeSec += (lot.ok_parts_produced * lot.products.cycle_time);
       }
       obj.okParts += lot.ok_parts_produced;
+      obj.actual += lot.ok_parts_produced;
+
+      if (lot.lot_size > 0 && durMin > 0) {
+        const now = new Date();
+        const elapsed = differenceInMinutes(now > et ? et : now, st);
+        const ratio = Math.min(elapsed / durMin, 1);
+        obj.target += Math.round(ratio * lot.lot_size);
+      }
     });
-    stopsRes.data?.forEach((stop: any) => {
-      const dayStr = format(new Date(stop.start_time), 'yyyy-MM-dd');
+
+    // Parcourir stops
+    stopsResult.data?.forEach((stop: any) => {
+      const sTime = new Date(stop.start_time);
+      const eTime = stop.end_time ? new Date(stop.end_time) : new Date();
+      const durMin = Math.max(0, differenceInMinutes(eTime, sTime));
+      const dayStr = format(sTime, 'yyyy-MM-dd');
       if (!dateMap.has(dayStr)) {
         dateMap.set(dayStr, {
           date: dayStr,
           plannedTime: 0,
-          unplanned: 0,
+          plannedStops: 0,
+          unplannedStops: 0,
           netTimeSec: 0,
           okParts: 0,
-          scrapParts: 0
+          scrapParts: 0,
+          rework: 0,
+          other: 0,
+          actual: 0,
+          target: 0
         });
       }
       const obj = dateMap.get(dayStr);
-      if (stop.failure_type !== 'PA') { // Tous les arrêts non planifiés
-        const sTime = new Date(stop.start_time);
-        const eTime = stop.end_time ? new Date(stop.end_time) : new Date();
-        const durMin = differenceInMinutes(eTime, sTime);
-        obj.unplanned += Math.max(0, durMin);
+      const hours = durMin / 60;
+      addDowntime(stop.failure_type || 'other', hours);
+      obj.unplannedStops += durMin;
+
+      if (!stopMap.has(dayStr)) {
+        stopMap.set(dayStr, {
+          date: dayStr,
+          AP: 0, PA: 0, DO: 0, NQ: 0, other: 0
+        });
+      }
+      const stObj = stopMap.get(dayStr);
+      const ft = stop.failure_type || 'other';
+      if (['AP', 'PA', 'DO', 'NQ'].includes(ft)) {
+        stObj[ft] += hours;
+      } else {
+        stObj.other += hours;
+      }
+      if (stop.failure_type === 'PA') {
+        obj.plannedStops += durMin;
       }
     });
-    qualityRes.data?.forEach((q: any) => {
-      const dayStr = q.date;
+
+    // Parcourir quality
+    qualityResult.data?.forEach((issue: any) => {
+      const dayStr = issue.date;
       if (!dateMap.has(dayStr)) {
         dateMap.set(dayStr, {
           date: dayStr,
           plannedTime: 0,
-          unplanned: 0,
+          plannedStops: 0,
+          unplannedStops: 0,
           netTimeSec: 0,
           okParts: 0,
-          scrapParts: 0
+          scrapParts: 0,
+          rework: 0,
+          other: 0,
+          actual: 0,
+          target: 0
         });
       }
       const obj = dateMap.get(dayStr);
-      if (q.category === 'scrap') {
-        obj.scrapParts = (obj.scrapParts || 0) + q.quantity;
+      if (issue.category === 'scrap') {
+        obj.scrapParts += issue.quantity;
+      } else if (issue.category.includes('rework')) {
+        obj.rework += issue.quantity;
+      } else {
+        obj.other += issue.quantity;
       }
     });
-    const arr: any[] = [];
-    Array.from(dateMap.values()).sort((a, b) => (a.date < b.date ? -1 : 1)).forEach(d => {
-      const runTime = Math.max(0, d.plannedTime - d.unplanned);
+
+    // Calcul final
+    const tmpOEEData: any[] = [];
+    const tmpProdData: any[] = [];
+    const tmpQualityData: any[] = [];
+    const tmpStopTime: any[] = [];
+    let dayCount = 0;
+    let sumA = 0, sumP = 0, sumQ = 0, sumOEE = 0;
+    let globalOk = 0, globalScrap = 0, globalDefects = 0;
+    let totalStopHours = 0;
+
+    const allDates = Array.from(dateMap.values()).sort((a, b) => (a.date < b.date ? -1 : 1));
+    allDates.forEach(d => {
+      const plannedProdTime = Math.max(0, d.plannedTime - d.plannedStops);
+      const runTime = Math.max(0, d.plannedTime - d.unplannedStops);
+
+      let A = 0;
+      if (plannedProdTime > 0) {
+        A = (runTime / plannedProdTime) * 100;
+      }
       let netSec = d.netTimeSec;
-      const totParts = d.okParts + (d.scrapParts || 0);
+      const totParts = d.okParts + d.scrapParts;
       if (d.okParts > 0 && d.scrapParts > 0) {
         const avgCycle = netSec / d.okParts;
         netSec += avgCycle * d.scrapParts;
       }
       const netMin = netSec / 60;
-      let A = 0, P = 0, Q = 0, OEE = 0;
-      if (d.plannedTime > 0) {
-        A = (runTime / d.plannedTime) * 100;
-      }
+      let P = 0;
       if (runTime > 0) {
         P = (netMin / runTime) * 100;
         if (P > 100) P = 100;
       }
+      let Q = 100;
       if (totParts > 0) {
         Q = (d.okParts / totParts) * 100;
       }
-      const frac = (A * P * Q) / 1000000;
-      OEE = frac * 100;
-      arr.push({
+      const OEEfrac = (A * P * Q) / 1000000;
+      const OEEpct = OEEfrac * 100;
+
+      tmpOEEData.push({
         date: d.date,
-        oee: OEE,
+        oee: OEEpct,
         availability: A,
         performance: P,
         quality: Q
       });
-    });
-    return arr;
-  };
+      tmpProdData.push({
+        date: d.date,
+        actual: d.okParts,
+        target: d.target > 0 ? d.target : totParts,
+        scrap: d.scrapParts
+      });
+      tmpQualityData.push({
+        date: d.date,
+        rework: d.rework,
+        scrap: d.scrapParts,
+        other: d.other
+      });
 
-  const handleExport = () => {
+      if (totParts > 0) {
+        dayCount++;
+        sumA += A;
+        sumP += P;
+        sumQ += Q;
+        sumOEE += OEEpct;
+      }
+      globalOk += d.okParts;
+      globalScrap += d.scrapParts;
+      globalDefects += (d.scrapParts + d.rework + d.other);
+    });
+
+    const allStopDates = Array.from(stopMap.values()).sort((a, b) => (a.date < b.date ? -1 : 1));
+    allStopDates.forEach(s => {
+      tmpStopTime.push(s);
+    });
+
+    tmpDowntime.forEach(d => {
+      totalStopHours += d.value;
+    });
+
+    let avgA = 0, avgP = 0, avgQ = 0, avgOEE = 0;
+    if (dayCount > 0) {
+      avgA = sumA / dayCount;
+      avgP = sumP / dayCount;
+      avgQ = sumQ / dayCount;
+      avgOEE = sumOEE / dayCount;
+    }
+    const totalProduction = globalOk;
+    const totalScrap = globalScrap;
+    const totalDefects = globalDefects;
+    const firstPassYield = totalProduction > 0 ? ((totalProduction - totalDefects) / totalProduction) * 100 : 0;
+    const scrapRate = totalProduction > 0 ? (totalScrap / totalProduction) * 100 : 0;
+
+    // On renvoie les 4 tableaux + un objet metrics
+    return {
+      oeeData: tmpOEEData,
+      productionData: tmpProdData,
+      qualityData: tmpQualityData,
+      stopTimeData: tmpStopTime,
+      metrics: {
+        oee: avgOEE,
+        availability: avgA,
+        performance: avgP,
+        quality: avgQ,
+        totalProduction,
+        firstPassYield,
+        scrapRate,
+        totalStopTime: totalStopHours
+      }
+    };
+  }
+
+  // ------------------- Export -------------------
+  function handleExport() {
     const exportData = {
       oee: oeeData,
       production: productionData,
       quality: qualityData,
+      stopTime: stopTimeData,
       downtime: downtimeData
     };
     const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
@@ -709,40 +1102,40 @@ const ReportsPage: React.FC = () => {
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
-  };
+  }
 
   const handleFilterChange = (category: string, values: string[]) => {
     setSelectedFilters(prev => ({ ...prev, [category]: values }));
   };
-
   const handleClearFilters = () => {
     setSelectedFilters({ machines: [], lines: [], products: [], teams: [] });
   };
 
-  // Boutons actifs si filtre ou comparaison
   const isFilterActive =
     selectedFilters.machines.length > 0 ||
     selectedFilters.lines.length > 0 ||
     selectedFilters.products.length > 0 ||
     selectedFilters.teams.length > 0;
 
+  // ------------------- Rendu -------------------
   return (
     <ProjectLayout>
       <div className="py-8 px-4 sm:px-6 lg:px-8">
         {/* Header */}
-        <div className="flex items-center justify-between mb-6">
+        <div className="flex flex-col md:flex-row md:items-center md:justify-between mb-6 space-y-4 md:space-y-0">
           <div>
             <h2 className="text-2xl font-bold text-gray-900">Reports & Analytics</h2>
             <p className="mt-1 text-sm text-gray-500">
               Analyze your production performance and identify improvement opportunities
             </p>
           </div>
-          <div className="flex items-center space-x-3">
-            {/* Période */}
+          <div className="flex flex-col sm:flex-row sm:space-x-3 space-y-2 sm:space-y-0">
+            {/* Sélection de période */}
             <div className="relative">
               <button
                 onClick={() => setShowPeriodDropdown(!showPeriodDropdown)}
-                className="inline-flex items-center px-4 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
+                className="inline-flex items-center px-4 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium 
+                  text-gray-700 bg-white hover:bg-gray-50"
               >
                 <Calendar className="h-4 w-4 mr-2" />
                 {selectedPeriod === 'today'
@@ -785,26 +1178,43 @@ const ReportsPage: React.FC = () => {
             </div>
 
             {/* Compare */}
-            <button
-              onClick={() => setShowCompareModal(true)}
-              className={`inline-flex items-center px-4 py-2 border rounded-md shadow-sm text-sm font-medium ${
-                showComparison
-                  ? 'border-blue-600 text-blue-600 bg-blue-50 hover:bg-blue-100'
-                  : 'border-gray-300 text-gray-700 bg-white hover:bg-gray-50'
-              }`}
-            >
-              <ArrowRightLeft className="h-4 w-4 mr-2" />
-              Compare
-            </button>
+            {!showComparison ? (
+              <button
+                onClick={() => setShowCompareModal(true)}
+                className="inline-flex items-center px-4 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium
+                  text-gray-700 bg-white hover:bg-gray-50"
+              >
+                <ArrowRightLeft className="h-4 w-4 mr-2" />
+                Compare
+              </button>
+            ) : (
+              <div className="flex items-center space-x-2">
+                <button
+                  disabled
+                  className="inline-flex items-center px-4 py-2 border border-blue-600 rounded-md shadow-sm text-sm font-medium
+                    text-blue-600 bg-blue-50 cursor-default"
+                >
+                  <ArrowRightLeft className="h-4 w-4 mr-2" />
+                  Comparing
+                </button>
+                <button
+                  onClick={clearComparison}
+                  className="inline-flex items-center px-3 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-red-600 bg-red-50 hover:bg-red-100"
+                >
+                  <X className="h-4 w-4 mr-1" /> Clear
+                </button>
+              </div>
+            )}
 
-            {/* Filters */}
+            {/* Filtres */}
             <button
               onClick={() => setShowFilterPanel(true)}
-              className={`inline-flex items-center px-4 py-2 border rounded-md shadow-sm text-sm font-medium ${
-                isFilterActive
-                  ? 'border-blue-600 text-blue-600 bg-blue-50 hover:bg-blue-100'
-                  : 'border-gray-300 text-gray-700 bg-white hover:bg-gray-50'
-              }`}
+              className={`inline-flex items-center px-4 py-2 border rounded-md shadow-sm text-sm font-medium
+                ${
+                  isFilterActive
+                    ? 'border-blue-600 text-blue-600 bg-blue-50 hover:bg-blue-100'
+                    : 'border-gray-300 text-gray-700 bg-white hover:bg-gray-50'
+                }`}
             >
               <Filter className="h-4 w-4 mr-2" />
               Filters
@@ -821,6 +1231,7 @@ const ReportsPage: React.FC = () => {
           </div>
         </div>
 
+        {/* Panneau de filtres */}
         <FilterPanel
           isVisible={showFilterPanel}
           onClose={() => setShowFilterPanel(false)}
@@ -830,6 +1241,7 @@ const ReportsPage: React.FC = () => {
           onClearFilters={handleClearFilters}
         />
 
+        {/* Contenu */}
         {loading ? (
           <div className="flex justify-center items-center h-64">
             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
@@ -852,97 +1264,150 @@ const ReportsPage: React.FC = () => {
             </p>
           </div>
         ) : (
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {/* OEE Overview */}
-            <div className="bg-white shadow rounded-lg p-6">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="text-lg font-medium text-gray-900">OEE Overview</h3>
-                <div className="flex items-center space-x-2">
-                  <span className="text-3xl font-bold text-blue-600">
-                    {metrics.oee.toFixed(1)}%
-                  </span>
-                  <span className="text-sm text-green-600">↑ 2.3%</span>
+          <>
+            {/* Grille de 2 colonnes */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              {/* OEE Overview */}
+              <div className="bg-white shadow rounded-lg p-6">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-lg font-medium text-gray-900">OEE Overview</h3>
+                  <div className="flex items-center space-x-2">
+                    <span className="text-3xl font-bold text-blue-600">
+                      {metrics.oee.toFixed(1)}%
+                    </span>
+                    <span className="text-sm text-green-600">↑ 2.3%</span>
+                  </div>
                 </div>
+                <div className="grid grid-cols-3 gap-4 mb-6">
+                  <div className="text-center">
+                    <div className="text-2xl font-semibold text-gray-900">
+                      {metrics.availability.toFixed(1)}%
+                    </div>
+                    <div className="text-sm text-gray-500">Availability</div>
+                  </div>
+                  <div className="text-center">
+                    <div className="text-2xl font-semibold text-gray-900">
+                      {metrics.performance.toFixed(1)}%
+                    </div>
+                    <div className="text-sm text-gray-500">Performance</div>
+                  </div>
+                  <div className="text-center">
+                    <div className="text-2xl font-semibold text-gray-900">
+                      {metrics.quality.toFixed(1)}%
+                    </div>
+                    <div className="text-sm text-gray-500">Quality</div>
+                  </div>
+                </div>
+
+                {/* KPI comparé */}
+                {showComparison && comparisonMetrics && (
+                  <div className="grid grid-cols-3 gap-4 mb-6 border-b border-gray-200 pb-4">
+                    <div className="text-center">
+                      <div className="text-xs text-gray-400">Comparing Avail.</div>
+                      <div className="text-md font-medium text-blue-600">
+                        {comparisonMetrics.availability.toFixed(1)}%
+                      </div>
+                    </div>
+                    <div className="text-center">
+                      <div className="text-xs text-gray-400">Comparing Perf.</div>
+                      <div className="text-md font-medium text-blue-600">
+                        {comparisonMetrics.performance.toFixed(1)}%
+                      </div>
+                    </div>
+                    <div className="text-center">
+                      <div className="text-xs text-gray-400">Comparing Qual.</div>
+                      <div className="text-md font-medium text-blue-600">
+                        {comparisonMetrics.quality.toFixed(1)}%
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Affichage du graphique OEE avec données fusionnées */}
+                <OEEChart
+                  data={oeeDataMerged}      // Le tableau fusionné
+                  showComparison={showComparison}
+                />
               </div>
-              <div className="grid grid-cols-3 gap-4 mb-6">
-                <div className="text-center">
-                  <div className="text-2xl font-semibold text-gray-900">
-                    {metrics.availability.toFixed(1)}%
+
+              {/* Production Trends */}
+              <div className="bg-white shadow rounded-lg p-6">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-lg font-medium text-gray-900">Production Trends</h3>
+                  <div className="flex items-center space-x-2">
+                    <span className="text-3xl font-bold text-gray-900">
+                      {metrics.totalProduction.toLocaleString()}
+                    </span>
+                    <span className="text-sm text-green-600">↑ 5.7%</span>
                   </div>
-                  <div className="text-sm text-gray-500">Availability</div>
                 </div>
-                <div className="text-center">
-                  <div className="text-2xl font-semibold text-gray-900">
-                    {metrics.performance.toFixed(1)}%
+                <div className="grid grid-cols-2 gap-4 mb-6">
+                  <div>
+                    <div className="text-2xl font-semibold text-gray-900">
+                      {metrics.firstPassYield.toFixed(1)}%
+                    </div>
+                    <div className="text-sm text-gray-500">First Pass Yield</div>
                   </div>
-                  <div className="text-sm text-gray-500">Performance</div>
-                </div>
-                <div className="text-center">
-                  <div className="text-2xl font-semibold text-gray-900">
-                    {metrics.quality.toFixed(1)}%
+                  <div>
+                    <div className="text-2xl font-semibold text-gray-900">
+                      {metrics.scrapRate.toFixed(1)}%
+                    </div>
+                    <div className="text-sm text-gray-500">Scrap Rate</div>
                   </div>
-                  <div className="text-sm text-gray-500">Quality</div>
                 </div>
+                <ProductionChart
+                  data={productionData}
+                  showComparison={showComparison}
+                  comparisonData={productionComparisonData}
+                />
               </div>
-              <OEEChart
-                data={oeeData}
+
+              {/* Downtime Analysis */}
+              <div className="bg-white shadow rounded-lg p-6">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-lg font-medium text-gray-900">Downtime Analysis</h3>
+                  <div className="flex items-center space-x-2">
+                    <span className="text-2xl font-bold text-gray-900">
+                      {metrics.totalStopTime.toFixed(1)}h
+                    </span>
+                    <span className="text-sm text-red-600">Stop Time</span>
+                  </div>
+                </div>
+                <DowntimeChart
+                  data={downtimeData}
+                  showComparison={false}
+                />
+              </div>
+
+              {/* Quality Issues */}
+              <div className="bg-white shadow rounded-lg p-6">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-lg font-medium text-gray-900">Quality Issues</h3>
+                  <div className="flex items-center space-x-2">
+                    <span className="text-3xl font-bold text-gray-900">
+                      {((metrics.scrapRate / 100) * metrics.totalProduction).toFixed(0)}
+                    </span>
+                    <span className="text-sm text-red-600">Scrap + Rework</span>
+                  </div>
+                </div>
+                <QualityChart
+                  data={qualityData}
+                  showComparison={showComparison}
+                  comparisonData={qualityComparisonData}
+                />
+              </div>
+            </div>
+
+            {/* Stop Time Trend */}
+            <div className="bg-white shadow rounded-lg p-6 mt-6">
+              <h3 className="text-lg font-medium text-gray-900 mb-4">Stop Time Trend</h3>
+              <StopTimeChart
+                data={stopTimeData}
                 showComparison={showComparison}
-                comparisonData={comparisonData}
+                comparisonData={stopTimeComparisonData}
               />
             </div>
-
-            {/* Production Trends */}
-            <div className="bg-white shadow rounded-lg p-6">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="text-lg font-medium text-gray-900">Production Trends</h3>
-                <div className="flex items-center space-x-2">
-                  <span className="text-3xl font-bold text-gray-900">
-                    {metrics.totalProduction.toLocaleString()}
-                  </span>
-                  <span className="text-sm text-green-600">↑ 5.7%</span>
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-4 mb-6">
-                <div>
-                  <div className="text-2xl font-semibold text-gray-900">
-                    {metrics.firstPassYield.toFixed(1)}%
-                  </div>
-                  <div className="text-sm text-gray-500">First Pass Yield</div>
-                </div>
-                <div>
-                  <div className="text-2xl font-semibold text-gray-900">
-                    {metrics.scrapRate.toFixed(1)}%
-                  </div>
-                  <div className="text-sm text-gray-500">Scrap Rate</div>
-                </div>
-              </div>
-              <ProductionChart data={productionData} />
-            </div>
-
-            {/* Downtime Analysis */}
-            <div className="bg-white shadow rounded-lg p-6">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="text-lg font-medium text-gray-900">Downtime Analysis</h3>
-                <div className="flex items-center space-x-2">
-                  <span className="text-3xl font-bold text-gray-900">24.5h</span>
-                  <span className="text-red-600">↑ 1.2h</span>
-                </div>
-              </div>
-              <DowntimeChart data={downtimeData} />
-            </div>
-
-            {/* Quality Issues */}
-            <div className="bg-white shadow rounded-lg p-6">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="text-lg font-medium text-gray-900">Quality Issues</h3>
-                <div className="flex items-center space-x-2">
-                  <span className="text-3xl font-bold text-gray-900">187</span>
-                  <span className="text-red-600">↑ 12</span>
-                </div>
-              </div>
-              <QualityChart data={qualityData} />
-            </div>
-          </div>
+          </>
         )}
 
         {/* Detailed Reports */}
@@ -1004,6 +1469,7 @@ const ReportsPage: React.FC = () => {
           </div>
         </div>
 
+        {/* Modals */}
         <ComparisonModal
           isVisible={showCompareModal}
           onClose={() => setShowCompareModal(false)}
