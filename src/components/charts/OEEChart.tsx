@@ -1,5 +1,14 @@
 import React from 'react';
-import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
+import {
+  AreaChart,
+  Area,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  Legend,
+  ResponsiveContainer
+} from 'recharts';
 
 interface OEEData {
   date: string;
@@ -30,15 +39,16 @@ const OEEChart: React.FC<OEEChartProps> = ({
   showComparison = false,
   comparisonLabel = 'Previous Period'
 }) => {
-  // Combine current and comparison data for the tooltip
   const combinedData = data.map((item, index) => ({
     ...item,
-    ...(showComparison && comparisonData && comparisonData[index] ? {
-      oee_prev: comparisonData[index].oee,
-      availability_prev: comparisonData[index].availability,
-      performance_prev: comparisonData[index].performance,
-      quality_prev: comparisonData[index].quality
-    } : {})
+    ...(showComparison && comparisonData && comparisonData[index]
+      ? {
+          oee_prev: comparisonData[index].oee,
+          availability_prev: comparisonData[index].availability,
+          performance_prev: comparisonData[index].performance,
+          quality_prev: comparisonData[index].quality
+        }
+      : {})
   }));
 
   const CustomTooltip = ({ active, payload, label }: any) => {
@@ -95,83 +105,17 @@ const OEEChart: React.FC<OEEChartProps> = ({
         <Tooltip content={<CustomTooltip />} />
         <Legend />
 
-        {/* Current period metrics */}
-        <Area
-          type="monotone"
-          dataKey="oee"
-          name="OEE"
-          stroke="#2563eb"
-          fill="#2563eb"
-          fillOpacity={0.1}
-          strokeWidth={2}
-        />
-        <Area
-          type="monotone"
-          dataKey="availability"
-          name="Availability"
-          stroke="#16a34a"
-          fill="#16a34a"
-          fillOpacity={0.1}
-          strokeWidth={2}
-        />
-        <Area
-          type="monotone"
-          dataKey="performance"
-          name="Performance"
-          stroke="#ea580c"
-          fill="#ea580c"
-          fillOpacity={0.1}
-          strokeWidth={2}
-        />
-        <Area
-          type="monotone"
-          dataKey="quality"
-          name="Quality"
-          stroke="#9333ea"
-          fill="#9333ea"
-          fillOpacity={0.1}
-          strokeWidth={2}
-        />
+        <Area type="monotone" dataKey="oee" name="OEE" stroke="#2563eb" fill="#2563eb" fillOpacity={0.1} strokeWidth={2} />
+        <Area type="monotone" dataKey="availability" name="Availability" stroke="#16a34a" fill="#16a34a" fillOpacity={0.1} strokeWidth={2} />
+        <Area type="monotone" dataKey="performance" name="Performance" stroke="#ea580c" fill="#ea580c" fillOpacity={0.1} strokeWidth={2} />
+        <Area type="monotone" dataKey="quality" name="Quality" stroke="#9333ea" fill="#9333ea" fillOpacity={0.1} strokeWidth={2} />
 
-        {/* Previous period metrics (dashed lines) */}
         {showComparison && (
           <>
-            <Area
-              type="monotone"
-              dataKey="oee_prev"
-              name={`OEE (${comparisonLabel})`}
-              stroke="#2563eb"
-              fill="none"
-              strokeDasharray="5 5"
-              strokeWidth={2}
-            />
-            <Area
-              type="monotone"
-              dataKey="availability_prev"
-              name={`Availability (${comparisonLabel})`}
-              stroke="#16a34a"
-              fill="none"
-              strokeDasharray="5 5"
-              strokeWidth={2}
-            />
-            <Area
-              type="monotone"
-              dataKey="performance_prev"
-              name={`Performance (${comparisonLabel})`}
-              stroke="#ea580c"
-              fill="none"
-              strokeDasharray="5 5"
-              strokeWidth={2}
-            />
-            <Area
-              type="monotone"
-              dataKey="quality_prev"
-              name={`Quality (${comparisonLabel})`}
-              stroke="#9333ea"
-              fill="none"
-              strokeDasharray="5 5"
-              strokeWidth={2}
-            />
+            <Area type="monotone" dataKey="oee_prev" name={`OEE (${comparisonLabel})`} stroke="#2563eb" fill="none" strokeDasharray="5 5" strokeWidth={2} />
+            <Area type="monotone" dataKey="availability_prev" name={`Availability (${comparisonLabel})`} stroke="#16a34a" fill="none" strokeDasharray="5 5" strokeWidth={2} />
+            <Area type="monotone" dataKey="performance_prev" name={`Performance (${comparisonLabel})`} stroke="#ea580c" fill="none" strokeDasharray="5 5" strokeWidth={2} />
+            <Area type="monotone" dataKey="quality_prev" name={`Quality (${comparisonLabel})`} stroke="#9333ea" fill="none" strokeDasharray="5 5" strokeWidth={2} />
           </>
         )}
       </AreaChart>

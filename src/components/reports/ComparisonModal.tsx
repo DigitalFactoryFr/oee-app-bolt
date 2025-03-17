@@ -1,5 +1,7 @@
+// src/components/reports/ComparisonModal.tsx
 import React from 'react';
-import { PenTool as Tool, Settings, Users, Package, X } from 'lucide-react';
+import { X } from 'lucide-react';
+import { PenTool as Tool, Settings, Users, Package } from 'lucide-react';
 
 interface ComparisonModalProps {
   isVisible: boolean;
@@ -57,14 +59,14 @@ const ComparisonModal: React.FC<ComparisonModalProps> = ({
               <X className="h-6 w-6" />
             </button>
           </div>
-          
+
           <div className="text-center mb-6">
             <h3 className="text-lg font-medium text-gray-900">Compare Data</h3>
             <p className="mt-2 text-sm text-gray-500">
               Select what you want to compare:
             </p>
           </div>
-          
+
           <div className="space-y-4">
             {comparisonOptions.map((option) => {
               const Icon = option.icon;

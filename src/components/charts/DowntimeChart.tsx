@@ -30,9 +30,7 @@ const DowntimeChart: React.FC<DowntimeChartProps> = ({ data }) => {
             <Cell key={`cell-${index}`} fill={entry.color} />
           ))}
         </Pie>
-        <Tooltip
-          formatter={(value: number) => `${value.toFixed(1)} hours`}
-        />
+        <Tooltip formatter={(value: number) => `${value.toFixed(1)} hours`} />
         <Legend />
       </PieChart>
     </ResponsiveContainer>

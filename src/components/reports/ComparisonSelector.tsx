@@ -1,3 +1,4 @@
+// src/components/reports/ComparisonSelector.tsx
 import React, { useState, useEffect } from 'react';
 import { X, Search } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
@@ -39,7 +40,8 @@ const ComparisonSelector: React.FC<ComparisonSelectorProps> = ({
   const loadItems = async () => {
     try {
       setLoading(true);
-      let query;
+
+      let query: any = null;
 
       switch (type) {
         case 'machines':
@@ -55,22 +57,23 @@ const ComparisonSelector: React.FC<ComparisonSelectorProps> = ({
             .eq('project_id', projectId);
           break;
         case 'teams':
-          query = supabase
+          // Teams -> on lit la table "team_members", on regroupe par team_name
+          // Ex. vous devrez adapter si votre schéma est différent
+          const { data: teamData, error: teamError } = await supabase
             .from('team_members')
             .select('team_name')
-            .eq('project_id', projectId)
-            .then(({ data, error }) => {
-              if (error) throw error;
-              const uniqueTeams = Array.from(new Set(data?.map(d => d.team_name)));
-              return {
-                data: uniqueTeams.map(team => ({
-                  id: team,
-                  name: team
-                })),
-                error: null
-              };
-            });
-          break;
+            .eq('project_id', projectId);
+
+          if (teamError) throw teamError;
+          const uniqueTeams = Array.from(new Set(teamData?.map((d: any) => d.team_name)));
+          const mappedTeams = uniqueTeams.map((t) => ({
+            id: t,
+            name: t
+          }));
+          setItems(mappedTeams);
+          setLoading(false);
+          return;
+
         case 'products':
           query = supabase
             .from('products')
@@ -78,6 +81,7 @@ const ComparisonSelector: React.FC<ComparisonSelectorProps> = ({
             .eq('project_id', projectId);
           break;
         default:
+          setLoading(false);
           return;
       }
 
@@ -85,8 +89,8 @@ const ComparisonSelector: React.FC<ComparisonSelectorProps> = ({
       if (error) throw error;
 
       setItems(data as ComparisonItem[]);
-    } catch (error) {
-      console.error('Error loading items:', error);
+    } catch (err) {
+      console.error('Error loading items:', err);
     } finally {
       setLoading(false);
     }
@@ -101,6 +105,7 @@ const ComparisonSelector: React.FC<ComparisonSelectorProps> = ({
       if (prev.includes(id)) {
         return prev.filter(i => i !== id);
       }
+      // Limiter à 2
       if (prev.length >= 2) {
         return [prev[1], id];
       }
@@ -108,7 +113,7 @@ const ComparisonSelector: React.FC<ComparisonSelectorProps> = ({
     });
   };
 
-  const handleCompare = () => {
+  const handleCompareClick = () => {
     onCompare(selectedItems);
     onClose();
   };
@@ -196,7 +201,7 @@ const ComparisonSelector: React.FC<ComparisonSelectorProps> = ({
                 Cancel
               </button>
               <button
-                onClick={handleCompare}
+                onClick={handleCompareClick}
                 disabled={selectedItems.length !== 2}
                 className="px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50"
               >

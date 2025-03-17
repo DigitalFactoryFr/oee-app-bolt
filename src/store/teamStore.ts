@@ -144,49 +144,69 @@ export const useTeamStore = create<TeamState>((set, get) => ({
     }
   },
 
+  
   async createMember(projectId, machineId, lineId, memberData) {
-    try {
-      set({ loading: true, error: null });
-      const insertData: Partial<TeamMember> = {
-        project_id: projectId,
-        email: memberData.email,
+  try {
+    set({ loading: true, error: null });
+    const insertData: Partial<TeamMember> = {
+      project_id: projectId,
+      email: memberData.email,
+      role: memberData.role,
+      team_name: memberData.team_name,
+      working_time_minutes: memberData.working_time_minutes,
+      status: 'pending', // Initialement en "pending"
+      invited_at: new Date().toISOString(),
+      machine_id: machineId || null,
+      line_id: lineId || null,
+    };
+    const { data, error } = await supabase
+      .from('team_members')
+      .insert([insertData])
+      .select()
+      .single();
+    if (error) throw error;
+
+    // Envoi de l'email d'invitation
+    const emailSuccess = await sendEmail(
+      memberData.email!,
+      'You have been invited to join a project on Pilot',
+      'TEAM_INVITE',
+      {
         role: memberData.role,
-        team_name: memberData.team_name,
-        working_time_minutes: memberData.working_time_minutes,
-        status: 'pending',
-        invited_at: new Date().toISOString(),
-        machine_id: machineId || null,
-        line_id: lineId || null,
-      };
-      const { data, error } = await supabase
+        inviteUrl: data.id, // On utilise l'ID du membre créé
+      }
+    );
+
+    // Si l'email est envoyé avec succès, mettre à jour le statut à "invited"
+    if (emailSuccess) {
+      const { error: updateError } = await supabase
         .from('team_members')
-        .insert([insertData])
-        .select()
-        .single();
-      if (error) throw error;
-
-      // Optionnel : envoi d'email
-      await sendEmail(
-        memberData.email!,
-        'You have been invited to join a project on Pilot',
-        'TEAM_INVITE',
-        {
-          role: memberData.role,
-          inviteUrl: data.id,
-        }
-      );
-
+        .update({ status: 'invited' })
+        .eq('id', data.id);
+      if (updateError) {
+        console.error("Error updating status to 'invited':", updateError);
+      } else {
+        // Mise à jour de l'état local pour refléter le changement
+        set((state) => ({
+          members: [...state.members, { ...data, status: 'invited' } as TeamMember],
+          loading: false,
+        }));
+      }
+    } else {
+      // Si l'email n'a pas été envoyé, on garde le statut "pending"
       set((state) => ({
         members: [...state.members, data as TeamMember],
         loading: false,
       }));
-      return data as TeamMember;
-    } catch (err) {
-      console.error('Error creating team member:', err);
-      set({ error: (err as Error).message, loading: false });
-      return null;
     }
-  },
+    return data as TeamMember;
+  } catch (err) {
+    console.error('Error creating team member:', err);
+    set({ error: (err as Error).message, loading: false });
+    return null;
+  }
+},
+
 
   async updateMember(id, memberData) {
     try {
@@ -272,6 +292,8 @@ export const useTeamStore = create<TeamState>((set, get) => ({
           {
             role: member.role,
             inviteUrl: member.id,
+              email: memberEmail,
+  
           }
         );
         // Mettre à jour le statut

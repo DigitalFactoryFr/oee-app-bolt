@@ -24,9 +24,9 @@ interface QualityChartProps {
 
 const QualityChart: React.FC<QualityChartProps> = ({ 
   data, 
-  comparisonData,
-  showComparison = false,
-  comparisonLabel = 'Previous Period'
+  comparisonData, 
+  showComparison = false, 
+  comparisonLabel = 'Previous Period' 
 }) => {
   const combinedData = data.map((item, index) => ({
     ...item,
@@ -46,25 +46,19 @@ const QualityChart: React.FC<QualityChartProps> = ({
             <p className="text-sm text-yellow-600">
               Rework: {payload[0].value}
               {showComparison && payload[3] && (
-                <span className="text-gray-500 ml-2">
-                  (prev: {payload[3].value})
-                </span>
+                <span className="text-gray-500 ml-2">(prev: {payload[3].value})</span>
               )}
             </p>
             <p className="text-sm text-red-600">
               Scrap: {payload[1].value}
               {showComparison && payload[4] && (
-                <span className="text-gray-500 ml-2">
-                  (prev: {payload[4].value})
-                </span>
+                <span className="text-gray-500 ml-2">(prev: {payload[4].value})</span>
               )}
             </p>
             <p className="text-sm text-gray-600">
               Other: {payload[2].value}
               {showComparison && payload[5] && (
-                <span className="text-gray-500 ml-2">
-                  (prev: {payload[5].value})
-                </span>
+                <span className="text-gray-500 ml-2">(prev: {payload[5].value})</span>
               )}
             </p>
           </div>
@@ -82,36 +76,14 @@ const QualityChart: React.FC<QualityChartProps> = ({
         <YAxis />
         <Tooltip content={<CustomTooltip />} />
         <Legend />
-        
-        {/* Current period */}
         <Bar dataKey="rework" name="Rework" fill="#eab308" stackId="stack" />
         <Bar dataKey="scrap" name="Scrap" fill="#dc2626" stackId="stack" />
         <Bar dataKey="other" name="Other" fill="#9ca3af" stackId="stack" />
-
-        {/* Previous period */}
         {showComparison && (
           <>
-            <Bar 
-              dataKey="rework_prev" 
-              name={`Rework (${comparisonLabel})`} 
-              fill="#eab308" 
-              fillOpacity={0.3} 
-              stackId="stack_prev" 
-            />
-            <Bar 
-              dataKey="scrap_prev" 
-              name={`Scrap (${comparisonLabel})`} 
-              fill="#dc2626" 
-              fillOpacity={0.3} 
-              stackId="stack_prev" 
-            />
-            <Bar 
-              dataKey="other_prev" 
-              name={`Other (${comparisonLabel})`} 
-              fill="#9ca3af" 
-              fillOpacity={0.3} 
-              stackId="stack_prev" 
-            />
+            <Bar dataKey="rework_prev" name={`Rework (${comparisonLabel})`} fill="#eab308" fillOpacity={0.3} stackId="stack_prev" />
+            <Bar dataKey="scrap_prev" name={`Scrap (${comparisonLabel})`} fill="#dc2626" fillOpacity={0.3} stackId="stack_prev" />
+            <Bar dataKey="other_prev" name={`Other (${comparisonLabel})`} fill="#9ca3af" fillOpacity={0.3} stackId="stack_prev" />
           </>
         )}
       </BarChart>

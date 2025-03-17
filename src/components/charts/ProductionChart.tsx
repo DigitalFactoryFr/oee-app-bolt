@@ -22,12 +22,7 @@ interface ProductionChartProps {
   comparisonLabel?: string;
 }
 
-const ProductionChart: React.FC<ProductionChartProps> = ({ 
-  data, 
-  comparisonData,
-  showComparison = false,
-  comparisonLabel = 'Previous Period'
-}) => {
+const ProductionChart: React.FC<ProductionChartProps> = ({ data, comparisonData, showComparison = false, comparisonLabel = 'Previous Period' }) => {
   const combinedData = data.map((item, index) => ({
     ...item,
     ...(showComparison && comparisonData && comparisonData[index] ? {
@@ -46,25 +41,19 @@ const ProductionChart: React.FC<ProductionChartProps> = ({
             <p className="text-sm text-blue-600">
               Actual: {payload[0].value}
               {showComparison && payload[3] && (
-                <span className="text-gray-500 ml-2">
-                  (prev: {payload[3].value})
-                </span>
+                <span className="text-gray-500 ml-2">(prev: {payload[3].value})</span>
               )}
             </p>
             <p className="text-sm text-green-600">
               Target: {payload[1].value}
               {showComparison && payload[4] && (
-                <span className="text-gray-500 ml-2">
-                  (prev: {payload[4].value})
-                </span>
+                <span className="text-gray-500 ml-2">(prev: {payload[4].value})</span>
               )}
             </p>
             <p className="text-sm text-red-600">
               Scrap: {payload[2].value}
               {showComparison && payload[5] && (
-                <span className="text-gray-500 ml-2">
-                  (prev: {payload[5].value})
-                </span>
+                <span className="text-gray-500 ml-2">(prev: {payload[5].value})</span>
               )}
             </p>
           </div>
@@ -82,33 +71,14 @@ const ProductionChart: React.FC<ProductionChartProps> = ({
         <YAxis />
         <Tooltip content={<CustomTooltip />} />
         <Legend />
-        
-        {/* Current period */}
         <Bar dataKey="actual" name="Actual Production" fill="#2563eb" />
         <Bar dataKey="target" name="Target" fill="#16a34a" />
         <Bar dataKey="scrap" name="Scrap" fill="#dc2626" />
-
-        {/* Previous period */}
         {showComparison && (
           <>
-            <Bar 
-              dataKey="actual_prev" 
-              name={`Actual (${comparisonLabel})`} 
-              fill="#2563eb" 
-              fillOpacity={0.3} 
-            />
-            <Bar 
-              dataKey="target_prev" 
-              name={`Target (${comparisonLabel})`} 
-              fill="#16a34a" 
-              fillOpacity={0.3} 
-            />
-            <Bar 
-              dataKey="scrap_prev" 
-              name={`Scrap (${comparisonLabel})`} 
-              fill="#dc2626" 
-              fillOpacity={0.3} 
-            />
+            <Bar dataKey="actual_prev" name={`Actual (${comparisonLabel})`} fill="#2563eb" fillOpacity={0.3} />
+            <Bar dataKey="target_prev" name={`Target (${comparisonLabel})`} fill="#16a34a" fillOpacity={0.3} />
+            <Bar dataKey="scrap_prev" name={`Scrap (${comparisonLabel})`} fill="#dc2626" fillOpacity={0.3} />
           </>
         )}
       </BarChart>

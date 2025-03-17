@@ -69,31 +69,33 @@ const generateEmailHtml = (template: EmailTemplate, data: any): string => {
           <p>Need help? Contact our support team anytime.</p>
         </div>
       `;
-    case 'TEAM_INVITE':
-      const inviteLink = `${siteUrl}/invite/${data.inviteUrl}`;
-      console.log('[generateEmailHtml] Final invite link:', inviteLink);
-      return `
-        <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
-          <h1 style="color: #2563eb;">You've Been Invited!</h1>
-          <p>Hi ${data.email || ''},</p>
-          <p>
-            You've been invited to join 
-            <strong>${data.teamName || 'this project'}</strong> 
-            as a <strong>${data.role || 'member'}</strong>.
-          </p>
-          <p>Click the link below to acceptt your invitation:</p>
-          <p>
-            <a href="${inviteLink}" 
-               style="display: inline-block; background: #2563eb; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px;">
-              Accept Invitation
-            </a>
-          </p>
-          <p>If the button doesn't work, copy and paste this URL in your browser:</p>
-          <p style="word-break: break-all; color: #555;">
-            ${inviteLink}
-          </p>
-        </div>
-      `;
+ case 'TEAM_INVITE':
+  // Construction du lien complet d'invitation
+  const inviteLink = `${siteUrl}/invite/${data.inviteUrl}`;
+  console.log('[generateEmailHtml] Final invite link:', inviteLink);
+  return `
+    <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
+      <h1 style="color: #2563eb;">You've Been Invited!</h1>
+      <p>Hi ${data.email || ''},</p>
+      <p>
+        You've been invited to join 
+        <strong>${data.projectName || 'this project'}</strong> 
+        as a <strong>${data.role || 'member'}</strong>.
+      </p>
+      <p>Click the link below to accept your invitation:</p>
+      <p>
+        <a href="${inviteLink}" 
+           style="display: inline-block; background: #2563eb; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px;">
+          Accept Invitation
+        </a>
+      </p>
+      <p>If the button doesn't work, copy and paste the following URL into your browser:</p>
+      <p style="word-break: break-all; color: #555;">
+        ${inviteLink}
+      </p>
+    </div>
+  `;
+
     case 'SUBSCRIPTION_STARTED':
       return `
         <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">

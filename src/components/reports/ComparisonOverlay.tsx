@@ -1,6 +1,6 @@
+// src/components/reports/ComparisonOverlay.tsx
 import React from 'react';
 import { X } from 'lucide-react';
-import { supabase } from '../../lib/supabase';
 
 interface ComparisonData {
   label: string;
@@ -54,11 +54,13 @@ const ComparisonOverlay: React.FC<ComparisonOverlayProps> = ({
                           <span className="text-sm font-medium text-gray-400">
                             {data.comparison[index]}%
                           </span>
-                          <span className={`text-xs font-medium ${
-                            data.current[index] > data.comparison[index]
-                              ? 'text-green-600'
-                              : 'text-red-600'
-                          }`}>
+                          <span
+                            className={`text-xs font-medium ${
+                              data.current[index] > data.comparison[index]
+                                ? 'text-green-600'
+                                : 'text-red-600'
+                            }`}
+                          >
                             {data.current[index] > data.comparison[index] ? '↑' : '↓'}
                             {Math.abs(data.current[index] - data.comparison[index])}%
                           </span>
@@ -76,14 +78,20 @@ const ComparisonOverlay: React.FC<ComparisonOverlayProps> = ({
                     <div className="flex justify-between">
                       <span className="text-sm text-gray-500">Average Difference</span>
                       <span className="text-sm font-medium text-gray-900">
-                        {(data.current.reduce((a, b) => a + b, 0) / data.current.length -
-                          data.comparison.reduce((a, b) => a + b, 0) / data.comparison.length).toFixed(1)}%
+                        {(
+                          data.current.reduce((a, b) => a + b, 0) / data.current.length -
+                          data.comparison.reduce((a, b) => a + b, 0) / data.comparison.length
+                        ).toFixed(1)}
+                        %
                       </span>
                     </div>
                     <div className="flex justify-between">
                       <span className="text-sm text-gray-500">Max Difference</span>
                       <span className="text-sm font-medium text-gray-900">
-                        {Math.max(...data.current.map((val, i) => Math.abs(val - data.comparison[i])))}%
+                        {Math.max(
+                          ...data.current.map((val, i) => Math.abs(val - data.comparison[i]))
+                        )}
+                        %
                       </span>
                     </div>
                   </div>
