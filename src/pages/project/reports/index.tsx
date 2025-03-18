@@ -50,6 +50,9 @@ interface Metrics {
   firstPassYield: number;
   scrapRate: number;
   totalStopTime: number;
+  totalScrap?: number;
+  totalRework?: number;
+  totalPannes?: number; 
 }
 
 type PeriodType = 'today' | 'yesterday' | 'week' | 'month' | 'quarter';
@@ -298,19 +301,32 @@ function mapFailureType(ft: string | null | undefined): string {
     return data?.map((m: any) => m.id) || [];
   }
 
-  async function getProductIdsByName(names: string[]): Promise<string[]> {
-    if (!names.length) return [];
-    const { data, error } = await supabase
-      .from('products')
-      .select('id, name')
-      .eq('project_id', projectId)
-      .in('name', names);
-    if (error) {
-      console.error('getProductIdsByName error:', error);
-      return [];
-    }
-    return data?.map((p: any) => p.id) || [];
+async function getProductIdsByName(names: string[]): Promise<string[]> {
+  if (!names.length) return [];
+  
+  // Regex pour détecter un UUID
+  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  
+  // Si tous les "names" sont déjà des UUID, on les retourne directement
+  if (names.every(n => uuidRegex.test(n))) {
+    return names;
   }
+
+  // Sinon, on suppose que ce sont des noms
+  const { data, error } = await supabase
+    .from('products')
+    .select('id, name')
+    .eq('project_id', projectId)
+    .in('name', names);
+
+  if (error) {
+    console.error('getProductIdsByName error:', error);
+    return [];
+  }
+
+  return data?.map((p: any) => p.id) || [];
+}
+
 
   async function getTeamMemberIdsByTeamName(names: string[]): Promise<string[]> {
     if (!names.length) return [];
@@ -326,19 +342,30 @@ function mapFailureType(ft: string | null | undefined): string {
     return data?.map((t: any) => t.id) || [];
   }
 
-  async function getLineIdsByName(names: string[]): Promise<string[]> {
-    if (!names.length) return [];
-    const { data, error } = await supabase
-      .from('production_lines')
-      .select('id, name')
-      .eq('project_id', projectId)
-      .in('name', names);
-    if (error) {
-      console.error('getLineIdsByName error:', error);
-      return [];
-    }
-    return data?.map((l: any) => l.id) || [];
+async function getLineIdsByName(names: string[]): Promise<string[]> {
+  if (!names.length) return [];
+
+  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+  if (names.every(n => uuidRegex.test(n))) {
+    // Déjà des UUID
+    return names;
   }
+
+  const { data, error } = await supabase
+    .from('production_lines')
+    .select('id, name')
+    .eq('project_id', projectId)
+    .in('name', names);
+
+  if (error) {
+    console.error('getLineIdsByName error:', error);
+    return [];
+  }
+
+  return data?.map((l: any) => l.id) || [];
+}
+
 
   // ------------------- loadFilterOptions -------------------
   async function loadFilterOptions() {
@@ -384,7 +411,12 @@ function mapFailureType(ft: string | null | undefined): string {
 
       // Déterminer la plage de dates
       const { startDate, endDate } = getDateRange();
-
+let globalScrap = 0;
+let globalRework = 0;
+let globalPannes = 0;
+let totalPannesTime = 0;  
+      
+  
       // Préparer les requêtes
       let lotsQuery = supabase
         .from('lots')
@@ -575,6 +607,11 @@ stopsResult.data?.forEach((stop: any) => {
 
   // Utiliser mapFailureType une seule fois pour convertir la valeur
   const ft = mapFailureType(stop.failure_type);
+ if (ft === 'PA') {
+        globalPannes += 1;
+   totalPannesTime += hours;
+      }
+  
   addDowntime(ft, hours);
   
   obj.unplannedStops += durMin;
@@ -638,7 +675,7 @@ stopsResult.data?.forEach((stop: any) => {
       const tmpStopTime: any[] = [];
       let dayCount = 0;
       let sumA = 0, sumP = 0, sumQ = 0, sumOEE = 0;
-      let globalOk = 0, globalScrap = 0, globalDefects = 0;
+      let globalOk = 0, globalDefects = 0;
       let totalStopHours = 0;
 
       const allDates = Array.from(dateMap.values()).sort((a, b) => (a.date < b.date ? -1 : 1));
@@ -698,6 +735,7 @@ stopsResult.data?.forEach((stop: any) => {
         }
         globalOk += d.okParts;
         globalScrap += d.scrapParts;
+        globalRework += d.rework; 
         globalDefects += (d.scrapParts + d.rework + d.other);
       });
 
@@ -738,7 +776,11 @@ stopsResult.data?.forEach((stop: any) => {
         totalProduction,
         firstPassYield,
         scrapRate,
-        totalStopTime: totalStopHours
+        totalStopTime: totalStopHours,
+        totalScrap: globalScrap,
+        totalRework: globalRework,
+        totalPannes: globalPannes,
+        totalPannesTime: totalPannesTime,
       });
 
       setLoading(false);
@@ -791,370 +833,387 @@ setDowntimeComparisonData(dataB.downtimeData);
   }
 
   // Cette fonction charge la data "comparaison" pour un item (machine/line/product/team)
-  async function loadComparisonData(itemName: string) {
-    const { startDate, endDate } = getDateRange();
+async function loadComparisonData(itemName: string) {
+  const { startDate, endDate } = getDateRange();
+let globalScrap = 0;
+let globalRework = 0;
+  let globalPannes = 0
+    let totalPannesTime = 0;
+  
 
-    // 1) Trouver les IDs en fonction du type de comparaison
-    let machineIDs: string[] = [];
-    let lineIDs: string[] = [];
-    let productIDs: string[] = [];
-    let teamIDs: string[] = [];
+  // 1) Récupérer les IDs en fonction du type de comparaison
+  let finalMachineIDs: string[] = [];
+  let productIDs: string[] = [];
+  let teamIDs: string[] = [];
 
-    if (comparisonType === 'machines') {
-      machineIDs = await getMachineIdsByName([itemName]);
-    } else if (comparisonType === 'lines') {
-      lineIDs = await getLineIdsByName([itemName]);
-      if (lineIDs.length) {
-        // Récupérer toutes les machines de cette ligne
-        const { data: machOfLine } = await supabase
-          .from('machines')
-          .select('id, line_id')
-          .eq('project_id', projectId)
-          .in('line_id', lineIDs);
-        if (machOfLine) {
-          machineIDs = machOfLine.map((m: any) => m.id);
-        }
+  if (comparisonType === 'machines') {
+    // Pour une machine, récupération directe
+    finalMachineIDs = await getMachineIdsByName([itemName]);
+  } else if (comparisonType === 'lines') {
+    // Pour une ligne, on récupère l'ID de la ligne puis toutes les machines associées
+    const lineIDs = await getLineIdsByName([itemName]);
+    console.log(`[Comparison - Lines] Nom: ${itemName}, lineIDs: `, lineIDs);
+    if (lineIDs.length > 0) {
+      const { data: machines, error } = await supabase
+        .from('machines')
+        .select('id')
+        .eq('project_id', projectId)
+        .in('line_id', lineIDs);
+      if (error) {
+        console.error("Erreur lors de la récupération des machines pour la ligne:", error);
+        throw error;
       }
-    } else if (comparisonType === 'products') {
-      productIDs = await getProductIdsByName([itemName]);
-    } else if (comparisonType === 'teams') {
-      teamIDs = await getTeamMemberIdsByTeamName([itemName]);
+      if (machines) {
+        finalMachineIDs = machines.map((m: any) => m.id);
+      }
     }
-
-    // 2) Construire les requêtes (mêmes colonnes que loadData)
-    let lotsQuery = supabase
-      .from('lots')
-      .select(`
-        id,
-        start_time,
-        end_time,
-        machine,
-        product,
-        team_member,
-        lot_size,
-        ok_parts_produced,
-        products:product ( cycle_time )
-      `)
-      .eq('project_id', projectId)
-      .gte('start_time', startDate.toISOString())
-      .lte('start_time', endDate.toISOString());
-
-    let stopsQuery = supabase
-      .from('stop_events')
-      .select(`
-        id,
-        start_time,
-        end_time,
-        machine,
-        product,
-        team_member,
-        failure_type
-      `)
-      .eq('project_id', projectId)
-      .gte('start_time', startDate.toISOString())
-      .lte('start_time', endDate.toISOString());
-
-    let qualityQuery = supabase
-      .from('quality_issues')
-      .select(`
-        id,
-        machine,
-        product,
-        team_member,
-        date,
-        category,
-        quantity
-      `)
-      .eq('project_id', projectId)
-      .gte('date', format(startDate, 'yyyy-MM-dd'))
-      .lte('date', format(endDate, 'yyyy-MM-dd'));
-
-    // Appliquer les filtres en fonction du type
-    if (machineIDs.length > 0) {
-      lotsQuery.in('machine', machineIDs);
-      stopsQuery.in('machine', machineIDs);
-      qualityQuery.in('machine', machineIDs);
-    }
-    if (productIDs.length > 0) {
-      lotsQuery.in('product', productIDs);
-      stopsQuery.in('product', productIDs);
-      qualityQuery.in('product', productIDs);
-    }
-    if (teamIDs.length > 0) {
-      lotsQuery.in('team_member', teamIDs);
-      stopsQuery.in('team_member', teamIDs);
-      qualityQuery.in('team_member', teamIDs);
-    }
-
-    // 3) Exécuter
-    const [lotsResult, stopsResult, qualityResult] = await Promise.all([
-      lotsQuery,
-      stopsQuery,
-      qualityQuery
-    ]);
-    if (lotsResult.error) throw lotsResult.error;
-    if (stopsResult.error) throw stopsResult.error;
-    if (qualityResult.error) throw qualityResult.error;
-
-    // 4) Même logique que loadData => calculer oeeData, productionData, qualityData, stopTimeData + downtime
-    const dateMap = new Map<string, any>();
-    const stopMap = new Map<string, any>();
-    const tmpDowntime: any[] = [];
-
-function addDowntime(type: string, hours: number) {
-  const found = tmpDowntime.find(x => x.name === type);
-  if (found) {
-    found.value += hours;
-  } else {
-    tmpDowntime.push({
-      name: type,
-      value: hours,
-      color:
-        type === 'AP' ? '#2563eb' :
-        type === 'PA' ? '#dc2626' :
-        type === 'DO' ? '#eab308' :
-        type === 'NQ' ? '#9333ea' :
-        '#9ca3af'  // couleur par défaut pour CS
-    });
+  } else if (comparisonType === 'products') {
+    // Pour un produit, récupération directe
+    productIDs = await getProductIdsByName([itemName]);
+    console.log(`[Comparison - Products] Nom: ${itemName}, productIDs: `, productIDs);
+  } else if (comparisonType === 'teams') {
+    // Pour une équipe
+    teamIDs = await getTeamMemberIdsByTeamName([itemName]);
   }
-}
 
+  // Supprimer les doublons
+  finalMachineIDs = Array.from(new Set(finalMachineIDs));
+  productIDs = Array.from(new Set(productIDs));
+  teamIDs = Array.from(new Set(teamIDs));
 
-    lotsResult.data?.forEach((lot: any) => {
-      const dayStr = format(new Date(lot.start_time), 'yyyy-MM-dd');
-      if (!dateMap.has(dayStr)) {
-        dateMap.set(dayStr, {
-          date: dayStr,
-          plannedTime: 0,
-          plannedStops: 0,
-          unplannedStops: 0,
-          netTimeSec: 0,
-          okParts: 0,
-          scrapParts: 0,
-          rework: 0,
-          other: 0,
-          actual: 0,
-          target: 0
-        });
-      }
-      const obj = dateMap.get(dayStr);
-      const st = new Date(lot.start_time);
-      const et = lot.end_time ? new Date(lot.end_time) : new Date();
-      const durMin = Math.max(0, differenceInMinutes(et, st));
-      obj.plannedTime += durMin;
+  console.log(`[Comparison] Type: ${comparisonType} pour "${itemName}"`);
+  console.log("Machine IDs:", finalMachineIDs);
+  console.log("Product IDs:", productIDs);
+  console.log("Team IDs:", teamIDs);
 
-      if (lot.products?.cycle_time && lot.ok_parts_produced > 0) {
-        obj.netTimeSec += (lot.ok_parts_produced * lot.products.cycle_time);
-      }
-      obj.okParts += lot.ok_parts_produced;
-      obj.actual += lot.ok_parts_produced;
+  // 2) Construire les requêtes sur la période
+  let lotsQuery = supabase
+    .from('lots')
+    .select(`
+      id,
+      start_time,
+      end_time,
+      machine,
+      product,
+      team_member,
+      lot_size,
+      ok_parts_produced,
+      products:product ( cycle_time )
+    `)
+    .eq('project_id', projectId)
+    .gte('start_time', startDate.toISOString())
+    .lte('start_time', endDate.toISOString());
 
-      if (lot.lot_size > 0 && durMin > 0) {
-        const now = new Date();
-        const elapsed = differenceInMinutes(now > et ? et : now, st);
-        const ratio = Math.min(elapsed / durMin, 1);
-        obj.target += Math.round(ratio * lot.lot_size);
-      }
-    });
+  let stopsQuery = supabase
+    .from('stop_events')
+    .select(`
+      id,
+      start_time,
+      end_time,
+      machine,
+      product,
+      team_member,
+      failure_type
+    `)
+    .eq('project_id', projectId)
+    .gte('start_time', startDate.toISOString())
+    .lte('start_time', endDate.toISOString());
 
-stopsResult.data?.forEach((stop: any) => {
-  const sTime = new Date(stop.start_time);
-  const eTime = stop.end_time ? new Date(stop.end_time) : new Date();
-  const durMin = Math.max(0, differenceInMinutes(eTime, sTime));
-  const dayStr = format(sTime, 'yyyy-MM-dd');
+  let qualityQuery = supabase
+    .from('quality_issues')
+    .select(`
+      id,
+      machine,
+      product,
+      team_member,
+      date,
+      category,
+      quantity
+    `)
+    .eq('project_id', projectId)
+    .gte('date', format(startDate, 'yyyy-MM-dd'))
+    .lte('date', format(endDate, 'yyyy-MM-dd'));
 
- if (!dateMap.has(dayStr)) {
-  dateMap.set(dayStr, {
-    date: dayStr,
-    plannedTime: 0,
-    plannedStops: 0,
-    unplannedStops: 0,
-    netTimeSec: 0,
-    okParts: 0,
-    scrapParts: 0,
-    rework: 0,
-    other: 0,
-    actual: 0,
-    target: 0
+  // 3) Appliquer les filtres obtenus (on applique seulement le filtre pertinent)
+  if (finalMachineIDs.length > 0) {
+    lotsQuery = lotsQuery.in('machine', finalMachineIDs);
+    stopsQuery = stopsQuery.in('machine', finalMachineIDs);
+    qualityQuery = qualityQuery.in('machine', finalMachineIDs);
+  }
+  if (productIDs.length > 0) {
+    lotsQuery = lotsQuery.in('product', productIDs);
+    stopsQuery = stopsQuery.in('product', productIDs);
+    qualityQuery = qualityQuery.in('product', productIDs);
+  }
+  if (teamIDs.length > 0) {
+    lotsQuery = lotsQuery.in('team_member', teamIDs);
+    stopsQuery = stopsQuery.in('team_member', teamIDs);
+    qualityQuery = qualityQuery.in('team_member', teamIDs);
+  }
+
+  // 4) Exécuter les requêtes
+  const [lotsResult, stopsResult, qualityResult] = await Promise.all([
+    lotsQuery,
+    stopsQuery,
+    qualityQuery
+  ]);
+  if (lotsResult.error) {
+    console.error("Erreur lors du chargement des lots :", lotsResult.error);
+    throw lotsResult.error;
+  }
+  if (stopsResult.error) {
+    console.error("Erreur lors du chargement des arrêts :", stopsResult.error);
+    throw stopsResult.error;
+  }
+  if (qualityResult.error) {
+    console.error("Erreur lors du chargement des issues qualité :", qualityResult.error);
+    throw qualityResult.error;
+  }
+
+  console.log(`[Comparison] ${itemName} - Lots: ${lotsResult.data?.length}, Stops: ${stopsResult.data?.length}, Quality: ${qualityResult.data?.length}`);
+
+  // 5) Traitement des données (basé sur loadData)
+  const dateMap = new Map<string, any>();
+  const stopMap = new Map<string, any>();
+  const tmpDowntime: any[] = [];
+
+  function addDowntime(type: string, hours: number) {
+    const found = tmpDowntime.find(x => x.name === type);
+    if (found) {
+      found.value += hours;
+    } else {
+      tmpDowntime.push({
+        name: type,
+        value: hours,
+        color:
+          type === 'AP' ? '#2563eb' :
+          type === 'PA' ? '#dc2626' :
+          type === 'DO' ? '#eab308' :
+          type === 'NQ' ? '#9333ea' :
+          '#9ca3af'
+      });
+    }
+  }
+
+  // Traitement des lots
+  lotsResult.data?.forEach((lot: any) => {
+    const dayStr = format(new Date(lot.start_time), 'yyyy-MM-dd');
+    if (!dateMap.has(dayStr)) {
+      dateMap.set(dayStr, {
+        date: dayStr,
+        plannedTime: 0,
+        plannedStops: 0,
+        unplannedStops: 0,
+        netTimeSec: 0,
+        okParts: 0,
+        scrapParts: 0,
+        rework: 0,
+        other: 0,
+        actual: 0,
+        target: 0
+      });
+    }
+    const obj = dateMap.get(dayStr);
+    const st = new Date(lot.start_time);
+    const et = lot.end_time ? new Date(lot.end_time) : new Date();
+    const durMin = Math.max(0, differenceInMinutes(et, st));
+    obj.plannedTime += durMin;
+    if (lot.products?.cycle_time && lot.ok_parts_produced > 0) {
+      obj.netTimeSec += lot.ok_parts_produced * lot.products.cycle_time;
+    }
+    obj.okParts += lot.ok_parts_produced;
+    obj.actual += lot.ok_parts_produced;
+    if (lot.lot_size > 0 && durMin > 0) {
+      const now = new Date();
+      const elapsed = differenceInMinutes(now > et ? et : now, st);
+      const ratio = Math.min(elapsed / durMin, 1);
+      obj.target += Math.round(ratio * lot.lot_size);
+    }
   });
-}
 
-  const obj = dateMap.get(dayStr);
-  const hours = durMin / 60;
+  // Traitement des arrêts
+  stopsResult.data?.forEach((stop: any) => {
+    const sTime = new Date(stop.start_time);
+    const eTime = stop.end_time ? new Date(stop.end_time) : new Date();
+    const durMin = Math.max(0, differenceInMinutes(eTime, sTime));
+    const dayStr = format(sTime, 'yyyy-MM-dd');
+    if (!dateMap.has(dayStr)) {
+      dateMap.set(dayStr, {
+        date: dayStr,
+        plannedTime: 0,
+        plannedStops: 0,
+        unplannedStops: 0,
+        netTimeSec: 0,
+        okParts: 0,
+        scrapParts: 0,
+        rework: 0,
+        other: 0,
+        actual: 0,
+        target: 0
+      });
+    }
+    const obj = dateMap.get(dayStr);
+    const hours = durMin / 60;
+    const ft = mapFailureType(stop.failure_type);
+     if (ft === 'PA') {
+    globalPannes += 1;
+    totalPannesTime += hours;
+  }
+    addDowntime(ft, hours);
+    obj.unplannedStops += durMin;
+    if (!stopMap.has(dayStr)) {
+      stopMap.set(dayStr, { date: dayStr, AP: 0, PA: 0, DO: 0, NQ: 0, CS: 0 });
+    }
+    const stObj = stopMap.get(dayStr);
+    if (ft === 'AP') {
+      stObj.AP += hours;
+    } else if (ft === 'PA') {
+      stObj.PA += hours;
+      obj.plannedStops += durMin;
+    } else if (ft === 'DO') {
+      stObj.DO += hours;
+    } else if (ft === 'NQ') {
+      stObj.NQ += hours;
+    } else {
+      stObj.CS += hours;
+    }
+  });
 
-  // => On doit convertir la failure_type en ft = mapFailureType(...)
-  const ft = mapFailureType(stop.failure_type);
-
-  // 1) Distribution globale (tmpDowntime)
-  addDowntime(ft, hours);
-
-  // 2) Incrémenter unplannedStops
-  obj.unplannedStops += durMin;
-
-  // 3) Mise à jour stopMap
-  if (!stopMap.has(dayStr)) {
-    stopMap.set(dayStr, {
+  // Traitement des issues qualité
+ qualityResult.data?.forEach((issue: any) => {
+  const dayStr = issue.date;
+  if (!dateMap.has(dayStr)) {
+    dateMap.set(dayStr, {
       date: dayStr,
-      AP: 0, PA: 0, DO: 0, NQ: 0, CS: 0
+      plannedTime: 0,
+      plannedStops: 0,
+      unplannedStops: 0,
+      netTimeSec: 0,
+      okParts: 0,
+      scrapParts: 0,
+      rework: 0,
+      other: 0,
+      actual: 0,
+      target: 0
     });
   }
-  const stObj = stopMap.get(dayStr);
-  if (ft === 'AP') {
-    stObj.AP += hours;
-  } else if (ft === 'PA') {
-    stObj.PA += hours;
-    obj.plannedStops += durMin;
-  } else if (ft === 'DO') {
-    stObj.DO += hours;
-  } else if (ft === 'NQ') {
-    stObj.NQ += hours;
+  const obj = dateMap.get(dayStr);
+  if (issue.category === 'scrap') {
+    obj.scrapParts += issue.quantity;
+    globalScrap += issue.quantity;  // Ajouté pour accumuler le scrap
+  } else if (issue.category.includes('rework')) {
+    obj.rework += issue.quantity;
+    globalRework += issue.quantity; // Ajouté pour accumuler le rework
   } else {
-    stObj.CS += hours;
+    obj.other += issue.quantity;
   }
-
-  // Optionnel: si stop.failure_type === 'PA', c’est déjà géré ci-dessus,
-  // donc la ligne suivante est peut-être en trop ou à enlever si vous ne la voulez plus en double :
-  // if (stop.failure_type === 'PA') { obj.plannedStops += durMin; }
 });
 
 
-    qualityResult.data?.forEach((issue: any) => {
-      const dayStr = issue.date;
-      if (!dateMap.has(dayStr)) {
-        dateMap.set(dayStr, {
-          date: dayStr,
-          plannedTime: 0,
-          plannedStops: 0,
-          unplannedStops: 0,
-          netTimeSec: 0,
-          okParts: 0,
-          scrapParts: 0,
-          rework: 0,
-          other: 0,
-          actual: 0,
-          target: 0
-        });
-      }
-      const obj = dateMap.get(dayStr);
-      if (issue.category === 'scrap') {
-        obj.scrapParts += issue.quantity;
-      } else if (issue.category.includes('rework')) {
-        obj.rework += issue.quantity;
-      } else {
-        obj.other += issue.quantity;
-      }
-    });
+  // Calcul final des indicateurs
+  const tmpOEEData: any[] = [];
+  const tmpProdData: any[] = [];
+  const tmpQualityData: any[] = [];
+  const tmpStopTime: any[] = [];
+  let dayCount = 0;
+  let sumA = 0, sumP = 0, sumQ = 0, sumOEE = 0;
+  let globalOk = 0, globalDefects = 0;
+  let totalStopHours = 0;
 
-    // Calcul final
-    const tmpOEEData: any[] = [];
-    const tmpProdData: any[] = [];
-    const tmpQualityData: any[] = [];
-    const tmpStopTime: any[] = [];
-    let dayCount = 0;
-    let sumA = 0, sumP = 0, sumQ = 0, sumOEE = 0;
-    let globalOk = 0, globalScrap = 0, globalDefects = 0;
-    let totalStopHours = 0;
-
-    const allDates = Array.from(dateMap.values()).sort((a, b) => (a.date < b.date ? -1 : 1));
-    allDates.forEach(d => {
-      const plannedProdTime = Math.max(0, d.plannedTime - d.plannedStops);
-      const runTime = Math.max(0, d.plannedTime - d.unplannedStops);
-
-      let A = 0;
-      if (plannedProdTime > 0) {
-        A = (runTime / plannedProdTime) * 100;
-      }
-      let netSec = d.netTimeSec;
-      const totParts = d.okParts + d.scrapParts;
-      if (d.okParts > 0 && d.scrapParts > 0) {
-        const avgCycle = netSec / d.okParts;
-        netSec += avgCycle * d.scrapParts;
-      }
-      const netMin = netSec / 60;
-      let P = 0;
-      if (runTime > 0) {
-        P = (netMin / runTime) * 100;
-        if (P > 100) P = 100;
-      }
-      let Q = 100;
-      if (totParts > 0) {
-        Q = (d.okParts / totParts) * 100;
-      }
-      const OEEfrac = (A * P * Q) / 1000000;
-      const OEEpct = OEEfrac * 100;
-
-      tmpOEEData.push({
-        date: d.date,
-        oee: OEEpct,
-        availability: A,
-        performance: P,
-        quality: Q
-      });
-      tmpProdData.push({
-        date: d.date,
-        actual: d.okParts,
-        target: d.target > 0 ? d.target : totParts,
-        scrap: d.scrapParts
-      });
-      tmpQualityData.push({
-        date: d.date,
-        rework: d.rework,
-        scrap: d.scrapParts,
-        other: d.other
-      });
-
-      if (totParts > 0) {
-        dayCount++;
-        sumA += A;
-        sumP += P;
-        sumQ += Q;
-        sumOEE += OEEpct;
-      }
-      globalOk += d.okParts;
-      globalScrap += d.scrapParts;
-      globalDefects += (d.scrapParts + d.rework + d.other);
-    });
-
-    const allStopDates = Array.from(stopMap.values()).sort((a, b) => (a.date < b.date ? -1 : 1));
-    allStopDates.forEach(s => {
-      tmpStopTime.push(s);
-    });
-
-    tmpDowntime.forEach(d => {
-      totalStopHours += d.value;
-    });
-
-    let avgA = 0, avgP = 0, avgQ = 0, avgOEE = 0;
-    if (dayCount > 0) {
-      avgA = sumA / dayCount;
-      avgP = sumP / dayCount;
-      avgQ = sumQ / dayCount;
-      avgOEE = sumOEE / dayCount;
+  const allDates = Array.from(dateMap.values()).sort((a, b) =>
+    a.date < b.date ? -1 : 1
+  );
+  allDates.forEach(d => {
+    const plannedProdTime = Math.max(0, d.plannedTime - d.plannedStops);
+    const runTime = Math.max(0, d.plannedTime - d.unplannedStops);
+    let A = plannedProdTime > 0 ? (runTime / plannedProdTime) * 100 : 0;
+    let netSec = d.netTimeSec;
+    const totParts = d.okParts + d.scrapParts;
+    if (d.okParts > 0 && d.scrapParts > 0) {
+      const avgCycle = netSec / d.okParts;
+      netSec += avgCycle * d.scrapParts;
     }
-    const totalProduction = globalOk;
-    const totalScrap = globalScrap;
-    const totalDefects = globalDefects;
-    const firstPassYield = totalProduction > 0 ? ((totalProduction - totalDefects) / totalProduction) * 100 : 0;
-    const scrapRate = totalProduction > 0 ? (totalScrap / totalProduction) * 100 : 0;
+    const netMin = netSec / 60;
+    let P = runTime > 0 ? (netMin / runTime) * 100 : 0;
+    if (P > 100) P = 100;
+    let Q = totParts > 0 ? (d.okParts / totParts) * 100 : 100;
+    const OEEfrac = (A * P * Q) / 1_000_000;
+    const OEEpct = OEEfrac * 100;
+    tmpOEEData.push({
+      date: d.date,
+      oee: OEEpct,
+      availability: A,
+      performance: P,
+      quality: Q
+    });
+    tmpProdData.push({
+      date: d.date,
+      actual: d.okParts,
+      target: d.target > 0 ? d.target : totParts,
+      scrap: d.scrapParts
+    });
+    tmpQualityData.push({
+      date: d.date,
+      rework: d.rework,
+      scrap: d.scrapParts,
+      other: d.other
+    });
+    if (totParts > 0) {
+      dayCount++;
+      sumA += A;
+      sumP += P;
+      sumQ += Q;
+      sumOEE += OEEpct;
+    }
+    globalOk += d.okParts;
+    globalScrap += d.scrapParts;
+    globalDefects += (d.scrapParts + d.rework + d.other);
+  });
 
-    return {
-      oeeData: tmpOEEData,
-      productionData: tmpProdData,
-      qualityData: tmpQualityData,
-      stopTimeData: tmpStopTime,
-      downtimeData: tmpDowntime, // distribution (pour un donut)
-      metrics: {
-        oee: avgOEE,
-        availability: avgA,
-        performance: avgP,
-        quality: avgQ,
-        totalProduction,
-        firstPassYield,
-        scrapRate,
-        totalStopTime: totalStopHours
-      }
-    };
-  }
+  Array.from(stopMap.values())
+    .sort((a, b) => (a.date < b.date ? -1 : 1))
+    .forEach(s => tmpStopTime.push(s));
+  tmpDowntime.forEach(d => {
+    totalStopHours += d.value;
+  });
+
+  const avgA = dayCount > 0 ? sumA / dayCount : 0;
+  const avgP = dayCount > 0 ? sumP / dayCount : 0;
+  const avgQ = dayCount > 0 ? sumQ / dayCount : 0;
+  const avgOEE = dayCount > 0 ? sumOEE / dayCount : 0;
+  const totalProduction = globalOk;
+  const totalScrap = globalScrap;
+  const firstPassYield = totalProduction > 0 ? ((totalProduction - globalDefects) / totalProduction) * 100 : 0;
+  const scrapRate = totalProduction > 0 ? (totalScrap / totalProduction) * 100 : 0;
+
+  return {
+    oeeData: tmpOEEData,
+    productionData: tmpProdData,
+    qualityData: tmpQualityData,
+    stopTimeData: tmpStopTime,
+    downtimeData: tmpDowntime,
+    totalScrap: globalScrap,
+    totalRework: globalRework,
+
+    metrics: {
+      oee: avgOEE,
+      availability: avgA,
+      performance: avgP,
+      quality: avgQ,
+      totalProduction,
+      firstPassYield,
+      totalScrap: globalScrap,
+      totalRework: globalRework,  
+      totalStopTime: totalStopHours,
+      totalPannes: globalPannes,
+      totalPannesTime: totalPannesTime,
+    }
+  };
+}
+
+
+
+
 
   // ------------------- Export -------------------
   function handleExport() {
@@ -1367,203 +1426,308 @@ stopsResult.data?.forEach((stop: any) => {
           <>
             {/* Grille de 2 colonnes */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              {/* OEE Overview */}
-              <div className="bg-white shadow rounded-lg p-6">
-                <div className="flex items-center justify-between mb-4">
-                  <h3 className="text-lg font-medium text-gray-900">OEE Overview</h3>
-                  <div className="flex items-center space-x-2">
-                    <span className="text-3xl font-bold text-blue-600">
-                      {metrics.oee.toFixed(1)}%
-                    </span>
-                    <span className="text-sm text-green-600">↑ 2.3%</span>
-                  </div>
-                </div>
 
-                {/* KPI "normaux" */}
-                <div className="grid grid-cols-3 gap-4 mb-6">
-                  <div className="text-center">
-                    <div className="text-2xl font-semibold text-gray-900">
-                      {metrics.availability.toFixed(1)}%
-                    </div>
-                    <div className="text-sm text-gray-500">Availability</div>
-                  </div>
-                  <div className="text-center">
-                    <div className="text-2xl font-semibold text-gray-900">
-                      {metrics.performance.toFixed(1)}%
-                    </div>
-                    <div className="text-sm text-gray-500">Performance</div>
-                  </div>
-                  <div className="text-center">
-                    <div className="text-2xl font-semibold text-gray-900">
-                      {metrics.quality.toFixed(1)}%
-                    </div>
-                    <div className="text-sm text-gray-500">Quality</div>
-                  </div>
-                </div>
 
-                {/* KPI comparés */}
-                {showComparison && comparisonMetrics && (
-                  <div className="grid grid-cols-3 gap-4 mb-6 border-b border-gray-200 pb-4">
-                    <div className="text-center">
-                      <div className="text-xs text-gray-400">Comparing Avail.</div>
-                      <div className="text-md font-medium text-blue-600">
-                        {comparisonMetrics.availability.toFixed(1)}%
-                      </div>
-                    </div>
-                    <div className="text-center">
-                      <div className="text-xs text-gray-400">Comparing Perf.</div>
-                      <div className="text-md font-medium text-blue-600">
-                        {comparisonMetrics.performance.toFixed(1)}%
-                      </div>
-                    </div>
-                    <div className="text-center">
-                      <div className="text-xs text-gray-400">Comparing Qual.</div>
-                      <div className="text-md font-medium text-blue-600">
-                        {comparisonMetrics.quality.toFixed(1)}%
-                      </div>
-                    </div>
-                  </div>
-                )}
+              
+              
+{/* OEE Overview */}
+<div className="bg-white shadow rounded-lg p-6">
+  {/* Titre + bloc OEE (principal uniquement) */}
+  <div className="flex items-center justify-between mb-4">
+    <h3 className="text-lg font-medium text-gray-900">OEE Overview</h3>
+    <div className="flex items-baseline space-x-2">
+      <span className="text-3xl font-bold text-blue-600">
+        {metrics.oee.toFixed(1)}%
+      </span>
+      <span className="text-sm text-green-600">↑ 2.3%</span>
+    </div>
+  </div>
 
-                {/* OEEChart : on affiche displayedOeeData */}
-                <OEEChart
-                  data={displayedOeeData}
-                  showComparison={showComparison}
-                />
+  {/* OEE comparé sur une nouvelle ligne, 3 colonnes : 
+      2 premières colonnes vides, 3e pour l'OEE comparé aligné à droite */}
+  {showComparison && comparisonMetrics && (
+    <div className="grid grid-cols-3 gap-4 mb-6">
+      {/* Colonnes 1 et 2 vides */}
+      <div />
+      <div />
+      {/* OEE comparé + flèche dans la même ligne */}
+      <div className="text-right opacity-70">
+        <div className="flex items-baseline justify-end space-x-2">
+          <span className="text-3xl font-bold text-blue-600">
+            {comparisonMetrics.oee.toFixed(1)}%
+          </span>
+          <span className="text-sm text-green-600">↑ 1.5%</span>
+        </div>
+      </div>
+    </div>
+  )}
+
+  {/* KPI "normaux" (A, P, Q) */}
+  <div className="grid grid-cols-3 gap-4 mb-6">
+    <div className="text-center">
+      <div className="text-2xl font-semibold text-gray-900">
+        {metrics.availability.toFixed(1)}%
+      </div>
+      <div className="text-sm text-gray-500">Availability</div>
+    </div>
+    <div className="text-center">
+      <div className="text-2xl font-semibold text-gray-900">
+        {metrics.performance.toFixed(1)}%
+      </div>
+      <div className="text-sm text-gray-500">Performance</div>
+    </div>
+    <div className="text-center">
+      <div className="text-2xl font-semibold text-gray-900">
+        {metrics.quality.toFixed(1)}%
+      </div>
+      <div className="text-sm text-gray-500">Quality</div>
+    </div>
+  </div>
+
+  {/* KPI comparés (mêmes couleurs, opacité) */}
+  {showComparison && comparisonMetrics && (
+    <div className="grid grid-cols-3 gap-4 mb-6 border-t pt-4">
+      <div className="text-center opacity-70">
+        <div className="text-2xl font-semibold text-gray-900">
+          {comparisonMetrics.availability.toFixed(1)}%
+        </div>
+        <div className="text-sm text-gray-500">Availability</div>
+      </div>
+      <div className="text-center opacity-70">
+        <div className="text-2xl font-semibold text-gray-900">
+          {comparisonMetrics.performance.toFixed(1)}%
+        </div>
+        <div className="text-sm text-gray-500">Performance</div>
+      </div>
+      <div className="text-center opacity-70">
+        <div className="text-2xl font-semibold text-gray-900">
+          {comparisonMetrics.quality.toFixed(1)}%
+        </div>
+        <div className="text-sm text-gray-500">Quality</div>
+      </div>
+    </div>
+  )}
+
+  {/* Ton composant OEEChart */}
+  <OEEChart
+    data={displayedOeeData}
+    showComparison={showComparison}
+  />
+</div>
+
+
+
+{/* Production Trends */}
+<div className="bg-white shadow rounded-lg p-6">
+  {/* Titre + Production principale */}
+  <div className="flex items-center justify-between mb-4">
+    <h3 className="text-lg font-medium text-gray-900">Production Trends</h3>
+    <div className="flex items-baseline space-x-2">
+      <span className="text-3xl font-bold text-gray-900">
+        {(metrics.totalProduction ?? 0).toLocaleString()}
+      </span>
+      <span className="text-sm text-green-600">↑ 5.7%</span>
+    </div>
+  </div>
+
+  {/* Production comparée sur une nouvelle ligne, dans une grille à 2 colonnes */}
+  {showComparison && comparisonMetrics && (
+    <div className="grid grid-cols-2 gap-4 mb-6">
+      {/* Première colonne vide pour conserver l'alignement */}
+      <div />
+      <div className="text-right opacity-50">
+        <div className="flex items-baseline justify-end space-x-2">
+          <span className="text-3xl font-bold text-gray-900">
+            {(comparisonMetrics.totalProduction ?? 0).toLocaleString()}
+          </span>
+          <span className="text-sm text-green-600">↑ 2.2%</span>
+        </div>
+      </div>
+    </div>
+  )}
+
+  {/* KPI normaux (First Pass Yield, Scrap Rate) */}
+  <div className="grid grid-cols-2 gap-4 mb-6">
+    <div className="text-center">
+      <div className="text-2xl font-semibold text-gray-900">
+        {(metrics.firstPassYield ?? 0).toFixed(1)}%
+      </div>
+      <div className="text-sm text-gray-500">First Pass Yield</div>
+    </div>
+    <div className="text-center">
+      <div className="text-2xl font-semibold text-gray-900">
+        {(metrics.scrapRate ?? 0).toFixed(1)}%
+      </div>
+      <div className="text-sm text-gray-500">Scrap Rate</div>
+    </div>
+  </div>
+
+  {/* KPI comparés (First Pass Yield, Scrap Rate) */}
+  {showComparison && comparisonMetrics && (
+    <div className="grid grid-cols-2 gap-4 mb-6 border-t pt-4">
+      <div className="text-center opacity-50">
+        <div className="text-2xl font-semibold text-gray-900">
+          {(comparisonMetrics.firstPassYield ?? 0).toFixed(1)}%
+        </div>
+        <div className="text-sm text-gray-500">First Pass Yield</div>
+      </div>
+      <div className="text-center opacity-50">
+        <div className="text-2xl font-semibold text-gray-900">
+          {(comparisonMetrics.scrapRate ?? 0).toFixed(1)}%
+        </div>
+        <div className="text-sm text-gray-500">Scrap Rate</div>
+      </div>
+    </div>
+  )}
+
+  {/* ProductionChart */}
+  <ProductionChart
+    data={displayedProductionData}
+    showComparison={showComparison}
+  />
+</div>
+
+
+
+
+           {/* Downtime Analysis */}
+<div className="bg-white shadow rounded-lg p-6">
+  {/* Titre + StopTime principal */}
+  <div className="flex items-center justify-between mb-4">
+    <h3 className="text-lg font-medium text-gray-900">Downtime Analysis</h3>
+    <div className="flex items-baseline space-x-2">
+      <span className="text-2xl font-bold text-gray-900">
+        {metrics.totalStopTime.toFixed(1)}h
+      </span>
+      <span className="text-sm text-red-600">Stop Time</span>
+    </div>
+  </div>
+
+  {/* StopTime comparé sur une nouvelle ligne, 2 colonnes (première vide, deuxième alignée à droite) */}
+  {showComparison && comparisonMetrics && (
+    <div className="grid grid-cols-2 gap-4 mb-6">
+      {/* Colonne vide pour “pousser” le comparé à droite */}
+      <div />
+      <div className="text-right opacity-50">
+        <div className="flex items-baseline justify-end space-x-2">
+          <span className="text-2xl font-bold text-gray-900">
+            {comparisonMetrics.totalStopTime.toFixed(1)}h
+          </span>
+          <span className="text-sm text-red-600">Stop Time</span>
+        </div>
+      </div>
+    </div>
+  )}
+
+  {/* DowntimeChart : data=displayedDowntimeData, comparisonData=displayedDowntimeComparison */}
+  <DowntimeChart
+    data={displayedDowntimeData}
+    showComparison={showComparison}
+    comparisonData={displayedDowntimeComparison}
+  />
+</div>
+
+
+              
+{/* Quality Issues */}
+<div className="bg-white shadow rounded-lg p-6">
+  <h3 className="text-lg font-medium text-gray-900 mb-4">Quality Issues</h3>
+
+  {/* 1) KPI principaux (Scrap, Rework) sur la première grille */}
+  <div className="grid grid-cols-2 gap-4 mb-6">
+    <div className="text-center">
+      <div className="text-3xl font-bold text-gray-900">
+        {(metrics.totalScrap ?? 0).toLocaleString()}
+      </div>
+      <div className="text-sm text-red-600">Scrap</div>
+    </div>
+    <div className="text-center">
+      <div className="text-3xl font-bold text-gray-900">
+        {(metrics.totalRework ?? 0).toLocaleString()}
+      </div>
+      <div className="text-sm text-red-600">Rework</div>
+    </div>
+  </div>
+
+  {/* 2) KPI comparés (Scrap, Rework) sur la deuxième grille */}
+  {showComparison && comparisonMetrics && (
+    <div className="grid grid-cols-2 gap-4 mb-6 border-t pt-4">
+      <div className="text-center opacity-70">
+        <div className="text-3xl font-bold text-gray-900">
+          {(comparisonMetrics.totalScrap ?? 0).toLocaleString()}
+        </div>
+        <div className="text-sm text-red-600">Scrap</div>
+      </div>
+      <div className="text-center opacity-70">
+        <div className="text-3xl font-bold text-gray-900">
+          {(comparisonMetrics.totalRework ?? 0).toLocaleString()}
+        </div>
+        <div className="text-sm text-red-600">Rework</div>
+      </div>
+    </div>
+  )}
+
+  {/* QualityChart */}
+  <QualityChart
+    data={displayedQualityData}
+    showComparison={showComparison}
+  />
+</div>
+
               </div>
 
-              {/* Production Trends */}
-              <div className="bg-white shadow rounded-lg p-6">
-                <div className="flex items-center justify-between mb-4">
-                  <h3 className="text-lg font-medium text-gray-900">Production Trends</h3>
-                  <div className="flex items-center space-x-2">
-                    <span className="text-3xl font-bold text-gray-900">
-                      {metrics.totalProduction.toLocaleString()}
-                    </span>
-                    <span className="text-sm text-green-600">↑ 5.7%</span>
-                  </div>
-                </div>
 
-                {/* KPI "normaux" */}
-                <div className="grid grid-cols-2 gap-4 mb-6">
-                  <div>
-                    <div className="text-2xl font-semibold text-gray-900">
-                      {metrics.firstPassYield.toFixed(1)}%
-                    </div>
-                    <div className="text-sm text-gray-500">First Pass Yield</div>
-                  </div>
-                  <div>
-                    <div className="text-2xl font-semibold text-gray-900">
-                      {metrics.scrapRate.toFixed(1)}%
-                    </div>
-                    <div className="text-sm text-gray-500">Scrap Rate</div>
-                  </div>
-                </div>
 
-                {/* KPI comparés */}
-                {showComparison && comparisonMetrics && (
-                  <div className="grid grid-cols-3 gap-4 mb-6 border-b border-gray-200 pb-4">
-                    <div className="text-center">
-                      <div className="text-xs text-gray-400">Comparing Prod.</div>
-                      <div className="text-md font-medium text-blue-600">
-                        {comparisonMetrics.totalProduction.toLocaleString()}
-                      </div>
-                    </div>
-                    <div className="text-center">
-                      <div className="text-xs text-gray-400">Comparing FPY</div>
-                      <div className="text-md font-medium text-blue-600">
-                        {comparisonMetrics.firstPassYield.toFixed(1)}%
-                      </div>
-                    </div>
-                    <div className="text-center">
-                      <div className="text-xs text-gray-400">Comparing Scrap</div>
-                      <div className="text-md font-medium text-blue-600">
-                        {comparisonMetrics.scrapRate.toFixed(1)}%
-                      </div>
-                    </div>
-                  </div>
-                )}
+              
+      
+{/* Stop Time Trend */}
+<div className="bg-white shadow rounded-lg p-6 mt-6">
+  <h3 className="text-lg font-medium text-gray-900 mb-4">Stop Time Trend</h3>
 
-                {/* ProductionChart : on affiche displayedProductionData */}
-                <ProductionChart
-                  data={displayedProductionData}
-                  showComparison={showComparison}
-                />
-              </div>
+  {/* 1) KPI principaux (Downtime for Breakdowns, Breakdown Frequency) */}
+  <div className="grid grid-cols-2 gap-4 mb-6">
+    <div className="text-center">
+      <div className="text-3xl font-bold text-gray-900">
+        {(metrics.totalPannesTime ?? 0).toFixed(1)}h
+      </div>
+      <div className="text-sm text-red-600">Downtime (Breakdowns)</div>
+    </div>
+    <div className="text-center">
+      <div className="text-3xl font-bold text-gray-900">
+        {metrics.totalPannes ?? 0}
+      </div>
+      <div className="text-sm text-red-600">Breakdown Frequency</div>
+    </div>
+  </div>
 
-              {/* Downtime Analysis */}
-              <div className="bg-white shadow rounded-lg p-6">
-                <div className="flex items-center justify-between mb-4">
-                  <h3 className="text-lg font-medium text-gray-900">Downtime Analysis</h3>
-                  <div className="flex items-center space-x-2">
-                    <span className="text-2xl font-bold text-gray-900">
-                      {metrics.totalStopTime.toFixed(1)}h
-                    </span>
-                    <span className="text-sm text-red-600">Stop Time</span>
-                  </div>
-                </div>
+  {/* 2) KPI comparés (Downtime, Frequency) sur la deuxième grille */}
+  {showComparison && comparisonMetrics && (
+    <div className="grid grid-cols-2 gap-4 mb-6 border-t pt-4">
+      <div className="text-center opacity-70">
+        <div className="text-3xl font-bold text-gray-900">
+          {(comparisonMetrics.totalPannesTime ?? 0).toFixed(1)}h
+        </div>
+        <div className="text-sm text-red-600">Downtime (Breakdowns)</div>
+      </div>
+      <div className="text-center opacity-70">
+        <div className="text-3xl font-bold text-gray-900">
+          {comparisonMetrics.totalPannes ?? 0}
+        </div>
+        <div className="text-sm text-red-600">Breakdown Frequency</div>
+      </div>
+    </div>
+  )}
 
-                {/* KPI comparés */}
-                {showComparison && comparisonMetrics && (
-                  <div className="grid grid-cols-1 gap-4 mb-6 border-b border-gray-200 pb-4">
-                    <div className="text-center">
-                      <div className="text-xs text-gray-400">Comparing Stop Time</div>
-                      <div className="text-md font-medium text-blue-600">
-                        {comparisonMetrics.totalStopTime.toFixed(1)}h
-                      </div>
-                    </div>
-                  </div>
-                )}
+  {/* StopTimeChart */}
+  <StopTimeChart
+    data={stopTimeData}
+    comparisonData={stopTimeComparisonData} // On passe bien la data comparée
+    showComparison={showComparison}
+    comparisonLabel="Previous Period"
+  />
+</div>
 
-                {/* DowntimeChart : data=displayedDowntimeData, comparisonData=displayedDowntimeComparison */}
-                <DowntimeChart
-                  data={displayedDowntimeData}
-                  showComparison={showComparison}
-                  comparisonData={displayedDowntimeComparison}
-                />
-              </div>
 
-              {/* Quality Issues */}
-              <div className="bg-white shadow rounded-lg p-6">
-                <div className="flex items-center justify-between mb-4">
-                  <h3 className="text-lg font-medium text-gray-900">Quality Issues</h3>
-                  <div className="flex items-center space-x-2">
-                    {/* ex. cumul scrap+rework */}
-                    <span className="text-3xl font-bold text-gray-900">
-                      {((metrics.scrapRate / 100) * metrics.totalProduction).toFixed(0)}
-                    </span>
-                    <span className="text-sm text-red-600">Scrap + Rework</span>
-                  </div>
-                </div>
-
-                {/* KPI comparés */}
-                {showComparison && comparisonMetrics && (
-                  <div className="grid grid-cols-1 gap-4 mb-6 border-b border-gray-200 pb-4">
-                    <div className="text-center">
-                      <div className="text-xs text-gray-400">Comparing Scrap+Rework</div>
-                      <div className="text-md font-medium text-blue-600">
-                        {((comparisonMetrics.scrapRate / 100) * comparisonMetrics.totalProduction).toFixed(0)}
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                {/* QualityChart : on affiche displayedQualityData */}
-                <QualityChart
-                  data={displayedQualityData}
-                  showComparison={showComparison}
-                />
-              </div>
-            </div>
-
-            {/* Stop Time Trend */}
-            <div className="bg-white shadow rounded-lg p-6 mt-6">
-              <h3 className="text-lg font-medium text-gray-900 mb-4">Stop Time Trend</h3>
-              <StopTimeChart
-                data={displayedStopTimeData}
-                showComparison={showComparison}
-              />
-            </div>
           </>
         )}
 

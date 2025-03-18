@@ -1,7 +1,26 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useParams } from 'react-router-dom';
-import { format, addHours, isSameDay, parseISO, differenceInMinutes, subHours, subDays } from 'date-fns';
-import { Activity, AlertTriangle, ArrowDown, ArrowUp, Clock, Search, Zap, CheckCircle, XCircle } from 'lucide-react';
+import {
+  format,
+  addHours,
+  isSameDay,
+  parseISO,
+  differenceInMinutes,
+  subHours,
+  subDays
+} from 'date-fns';
+import {
+  Activity,
+  AlertTriangle,
+  ArrowDown,
+  ArrowUp,
+  Clock,
+  Search,
+  Zap,
+  CheckCircle,
+  XCircle
+} from 'lucide-react';
+
 import ProjectLayout from '../../../components/layout/ProjectLayout';
 import { useProductionLineStore } from '../../../store/productionLineStore';
 import { useMachineStore } from '../../../store/machineStore';
@@ -38,23 +57,33 @@ type TimeRangeType = '12h' | '24h' | '7d';
 
 const RealTimeMonitoring: React.FC = () => {
   const { projectId } = useParams<{ projectId: string }>();
+  
+  // Stores (lignes, machines, produits)
   const { lines } = useProductionLineStore();
   const { machines, fetchMachines } = useMachineStore();
   const { products } = useProductStore();
   
+  // États
   const [selectedLine, setSelectedLine] = useState<string>('all');
+  const [selectedFilters, setSelectedFilters] = useState<string[]>([]); // Multi-lignes
+  const [lineDropdownOpen, setLineDropdownOpen] = useState(false);      // Pour afficher/masquer le menu lignes
+  const [showLineDropdown, setShowLineDropdown] = useState(false);
+
+
   const [timelineEvents, setTimelineEvents] = useState<TimelineEvent[]>([]);
   const [machineMetrics, setMachineMetrics] = useState<Record<string, MachineMetrics>>({});
+  
   const [timeRange, setTimeRange] = useState<TimeRangeType>('12h');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [machineFilter, setMachineFilter] = useState<'all' | 'running' | 'stopped'>('all');
-  const [selectedFilters, setSelectedFilters] = useState<string[]>([]);
 
+  // Au montage : fetch machines, subscribe à supabase, etc.
   useEffect(() => {
     if (projectId) {
       fetchMachines(projectId);
+
       const subscription = supabase
         .channel('real-time-changes')
         .on('postgres_changes', {
@@ -83,13 +112,31 @@ const RealTimeMonitoring: React.FC = () => {
     }
   }, [projectId]);
 
+useEffect(() => {
+  console.log('Lines loaded:', lines);
+}, [lines]);
+
+  
+  // Re-fetch à chaque changement de line/timeRange
   useEffect(() => {
     fetchData();
-    // Update refresh interval to 10 minutes (600000 ms)
-    const interval = setInterval(fetchData, 600000);
+    const interval = setInterval(fetchData, 600000); // 10 min
     return () => clearInterval(interval);
   }, [projectId, selectedLine, timeRange]);
 
+  // Gestion de la dropdown (fermeture au clic extérieur)
+  const dropdownRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+        setLineDropdownOpen(false);
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  // Détermine la date de début en fonction du timeRange
   const getStartTime = (now: Date) => {
     switch (timeRange) {
       case '12h':
@@ -103,9 +150,34 @@ const RealTimeMonitoring: React.FC = () => {
     }
   };
 
+  // Toggle l'ouverture du menu de lignes
+  const toggleLineDropdown = () => {
+    setLineDropdownOpen(!lineDropdownOpen);
+  };
+
+  // Gère la sélection multiple de lignes
+  const handleFilterSelect = (lineId: string) => {
+    if (selectedFilters.includes(lineId)) {
+      // On retire la ligne
+      setSelectedFilters(selectedFilters.filter(id => id !== lineId));
+    } else {
+      // On l'ajoute
+      setSelectedFilters([...selectedFilters, lineId]);
+    }
+    // On peut aussi forcer selectedLine = 'all' si on veut
+    setSelectedLine('all');
+  };
+
+  // "All lines"
+  const handleSelectAllLines = () => {
+    setSelectedFilters([]);      // On vide la sélection
+    setSelectedLine('all');      // On se place sur "all"
+    setLineDropdownOpen(false);  // Ferme le dropdown
+  };
+
+  // fetchData depuis supabase
   const fetchData = async () => {
     if (!projectId) return;
-
     try {
       setLoading(true);
       setError(null);
@@ -113,7 +185,7 @@ const RealTimeMonitoring: React.FC = () => {
       const now = new Date();
       const startTime = getStartTime(now);
 
-      // Fetch active lots
+      // 1) lots
       const { data: lots, error: lotsError } = await supabase
         .from('lots')
         .select(`
@@ -129,10 +201,9 @@ const RealTimeMonitoring: React.FC = () => {
         `)
         .eq('project_id', projectId)
         .gte('start_time', startTime.toISOString());
-
       if (lotsError) throw lotsError;
 
-      // Fetch stops
+      // 2) stops
       const { data: stops, error: stopsError } = await supabase
         .from('stop_events')
         .select(`
@@ -146,10 +217,9 @@ const RealTimeMonitoring: React.FC = () => {
         `)
         .eq('project_id', projectId)
         .gte('start_time', startTime.toISOString());
-
       if (stopsError) throw stopsError;
 
-      // Fetch quality issues
+      // 3) quality issues
       const { data: qualityIssues, error: qualityError } = await supabase
         .from('quality_issues')
         .select(`
@@ -164,14 +234,13 @@ const RealTimeMonitoring: React.FC = () => {
         `)
         .eq('project_id', projectId)
         .gte('start_time', startTime.toISOString());
-
       if (qualityError) throw qualityError;
 
-      // Build timeline events and calculate metrics for each machine
+      // Build timeline
       const events: TimelineEvent[] = [];
       const metrics: Record<string, MachineMetrics> = {};
 
-      // Initialize metrics for all machines
+      // Init metrics pour toutes les machines
       machines.forEach(machine => {
         metrics[machine.id] = {
           oee: 0,
@@ -183,8 +252,7 @@ const RealTimeMonitoring: React.FC = () => {
           trend: 0,
           status: 'idle'
         };
-
-        // Add idle state for the full time range
+        // Ajout d'un event "idle" par défaut
         events.push({
           id: `idle-${machine.id}`,
           type: 'idle',
@@ -198,7 +266,7 @@ const RealTimeMonitoring: React.FC = () => {
         });
       });
 
-      // Process lots and calculate metrics
+      // Process lots => timeline + metrics
       if (lots) {
         lots.forEach(lot => {
           events.push({
@@ -214,28 +282,20 @@ const RealTimeMonitoring: React.FC = () => {
             }
           });
 
-          // Update machine metrics
-          if (metrics[lot.machine.id]) {
+          // Màj metrics
+          const m = metrics[lot.machine.id];
+          if (m) {
             const okParts = lot.ok_parts_produced || 0;
-            const cycleTime = lot.product.cycle_time;
-            
-            metrics[lot.machine.id].partsProduced += okParts;
-            
-            // Calculate useful time (temps de cycle × nb de pièces bonnes)
-            const usefulTime = (cycleTime * okParts) / 3600; // Convert to hours
-            
-            // Calculate opening time
+            const cycleTime = lot.product.cycle_time || 0;
+            m.partsProduced += okParts;
+            const usefulTime = (cycleTime * okParts) / 3600; // h
             const start = new Date(lot.start_time);
             const end = lot.end_time ? new Date(lot.end_time) : now;
-            const openingTime = (end.getTime() - start.getTime()) / (1000 * 3600); // Convert to hours
-            
-            // Calculate OEE
+            const openingTime = (end.getTime() - start.getTime()) / 3_600_000; // h
             if (openingTime > 0) {
-              metrics[lot.machine.id].oee = (usefulTime / openingTime) * 100;
+              m.oee = (usefulTime / openingTime) * 100;
             }
-            
-            // Update machine status
-            metrics[lot.machine.id].status = 'running';
+            m.status = 'running';
           }
         });
       }
@@ -254,15 +314,14 @@ const RealTimeMonitoring: React.FC = () => {
               cause: `${stop.failure_type}: ${stop.cause}`
             }
           });
-
-          // Update machine status for ongoing stops
+          // Màj metrics
           if (!stop.end_time && metrics[stop.machine.id]) {
             metrics[stop.machine.id].status = 'stopped';
           }
         });
       }
 
-      // Process quality issues
+      // Process quality
       if (qualityIssues) {
         qualityIssues.forEach(issue => {
           events.push({
@@ -277,10 +336,10 @@ const RealTimeMonitoring: React.FC = () => {
               cause: issue.cause
             }
           });
-
-          // Update machine metrics
-          if (metrics[issue.machine.id]) {
-            metrics[issue.machine.id].defects += issue.quantity;
+          // Màj metrics
+          const m = metrics[issue.machine.id];
+          if (m) {
+            m.defects += issue.quantity;
           }
         });
       }
@@ -295,6 +354,7 @@ const RealTimeMonitoring: React.FC = () => {
     }
   };
 
+  // Helpers
   const getEventColor = (event: TimelineEvent) => {
     switch (event.type) {
       case 'production':
@@ -309,7 +369,6 @@ const RealTimeMonitoring: React.FC = () => {
         return 'bg-gray-500';
     }
   };
-
   const getMachineStatusColor = (status: string) => {
     switch (status) {
       case 'running':
@@ -320,7 +379,6 @@ const RealTimeMonitoring: React.FC = () => {
         return 'bg-gray-100 text-gray-800';
     }
   };
-
   const getMachineStatusIcon = (status: string) => {
     switch (status) {
       case 'running':
@@ -332,32 +390,37 @@ const RealTimeMonitoring: React.FC = () => {
     }
   };
 
+  // Filtrage final
   const filteredMachines = machines
-    .filter(machine => selectedLine === 'all' || machine.line_id === selectedLine)
     .filter(machine => {
+      // Soit "all lines" => on garde tout, soit on garde celles dans selectedFilters
+      if (selectedLine === 'all') {
+        // S'il y a des filters => on garde la machine si machine.line_id est dans selectedFilters
+        if (selectedFilters.length > 0) {
+          return selectedFilters.includes(machine.line_id);
+        }
+        // Sinon on garde tout
+        return true;
+      } else {
+        // Filtrage simple
+        return machine.line_id === selectedLine;
+      }
+    })
+    .filter(machine => {
+      const m = machineMetrics[machine.id];
       const matchesSearch = machine.name.toLowerCase().includes(searchTerm.toLowerCase());
       if (machineFilter === 'all') return matchesSearch;
-      
-      const metrics = machineMetrics[machine.id];
-      return matchesSearch && (
-        (machineFilter === 'running' && metrics?.status === 'running') ||
-        (machineFilter === 'stopped' && metrics?.status === 'stopped')
+      return (
+        matchesSearch &&
+        ((machineFilter === 'running' && m?.status === 'running') ||
+         (machineFilter === 'stopped' && m?.status === 'stopped'))
       );
     });
 
-  const handleFilterSelect = (lineId: string) => {
-    if (selectedFilters.includes(lineId)) {
-      setSelectedFilters(selectedFilters.filter(id => id !== lineId));
-    } else {
-      setSelectedFilters([...selectedFilters, lineId]);
-    }
-  };
-
+  // Timeline
   const renderTimeline = () => {
     const now = new Date();
     const startTime = getStartTime(now);
-
-    // Calculate time slots based on range
     let slotWidth: number;
     let slotInterval: number;
     let formatPattern: string;
@@ -387,17 +450,20 @@ const RealTimeMonitoring: React.FC = () => {
     const totalHours = timeRange === '7d' ? 168 : parseInt(timeRange);
     const totalSlots = Math.ceil(totalHours / slotInterval);
     const totalWidth = Math.max(1200, slotWidth * totalSlots);
-
-    // Create time slots
-    const timeSlots = Array.from({ length: totalSlots }, (_, i) => 
+    const timeSlots = Array.from({ length: totalSlots }, (_, i) =>
       addHours(startTime, i * slotInterval)
     );
 
     return (
       <div className="relative">
         {/* Timeline header */}
-        <div className="flex border-b border-gray-200 sticky top-0 bg-white z-10" style={{ width: `${totalWidth}px` }}>
-          <div className="w-64 flex-shrink-0 p-4 font-medium text-gray-700 bg-gray-50">Machine</div>
+        <div
+          className="flex border-b border-gray-200 sticky top-0 bg-white z-10"
+          style={{ width: `${totalWidth}px` }}
+        >
+          <div className="w-64 flex-shrink-0 p-4 font-medium text-gray-700 bg-gray-50">
+            Machine
+          </div>
           <div className="flex-1 flex">
             {timeSlots.map((time, i) => (
               <div
@@ -414,32 +480,34 @@ const RealTimeMonitoring: React.FC = () => {
         {/* Timeline rows */}
         <div style={{ width: `${totalWidth}px` }}>
           {filteredMachines.map(machine => {
-            const machineEvents = timelineEvents.filter(event => 
-              event.machine === machine.name
+            const machineEvents = timelineEvents.filter(
+              event => event.machine === machine.name
             );
-            const metrics = machineMetrics[machine.id];
+            const mm = machineMetrics[machine.id];
 
             return (
               <div key={machine.id} className="flex border-b border-gray-200">
                 <div className="w-64 flex-shrink-0 p-4 bg-gray-50">
                   <div className="flex items-center justify-between">
                     <div className="font-medium text-gray-900">{machine.name}</div>
-                    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getMachineStatusColor(metrics?.status || 'idle')}`}>
-                      {getMachineStatusIcon(metrics?.status || 'idle')}
-                      <span className="ml-1 capitalize">{metrics?.status || 'idle'}</span>
+                    <span
+                      className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getMachineStatusColor(mm?.status || 'idle')}`}
+                    >
+                      {getMachineStatusIcon(mm?.status || 'idle')}
+                      <span className="ml-1 capitalize">{mm?.status || 'idle'}</span>
                     </span>
                   </div>
                   <div className="mt-2 grid grid-cols-3 gap-2 text-xs">
                     <div>
-                      <div className="font-medium text-gray-900">{metrics?.oee.toFixed(1)}%</div>
+                      <div className="font-medium text-gray-900">{mm?.oee.toFixed(1)}%</div>
                       <div className="text-gray-500">OEE</div>
                     </div>
                     <div>
-                      <div className="font-medium text-gray-900">{metrics?.partsProduced}</div>
+                      <div className="font-medium text-gray-900">{mm?.partsProduced}</div>
                       <div className="text-gray-500">Parts</div>
                     </div>
                     <div>
-                      <div className="font-medium text-gray-900">{metrics?.defects}</div>
+                      <div className="font-medium text-gray-900">{mm?.defects}</div>
                       <div className="text-gray-500">Defects</div>
                     </div>
                   </div>
@@ -458,20 +526,15 @@ const RealTimeMonitoring: React.FC = () => {
                   {machineEvents.map(event => {
                     const start = new Date(event.startTime);
                     const end = event.endTime ? new Date(event.endTime) : now;
-
                     const startOffset = differenceInMinutes(start, startTime);
                     const duration = differenceInMinutes(end, start);
                     const totalMinutes = totalHours * 60;
-                    
-                    // Calculate position and width
+
                     const left = (startOffset / totalMinutes) * totalWidth;
                     const width = (duration / totalMinutes) * totalWidth;
-
-                    // Adjust position and width to stay within bounds
                     const adjustedLeft = Math.max(0, left);
                     const adjustedWidth = Math.min(totalWidth - adjustedLeft, width);
 
-                    // Skip if completely outside view
                     if (adjustedWidth <= 0 || adjustedLeft >= totalWidth) return null;
 
                     return (
@@ -482,8 +545,7 @@ const RealTimeMonitoring: React.FC = () => {
                           left: `${adjustedLeft}px`,
                           width: `${adjustedWidth}px`,
                           top: '50%',
-                          transform: 'translateY(-50%)',
-                          zIndex: event.type === 'stop' ? 30 : event.type === 'quality' ? 20 : event.type === 'production' ? 10 : 5
+                          transform: 'translateY(-50%)'
                         }}
                         title={`${event.type}: ${event.details.cause || event.details.product || 'Idle'}`}
                       />
@@ -501,35 +563,57 @@ const RealTimeMonitoring: React.FC = () => {
   return (
     <ProjectLayout>
       <div className="py-6 px-4 sm:px-6 lg:px-8">
-        <div className="flex items-center justify-between mb-6">
-          <div className="flex items-center space-x-4">
-            <div className="relative">
+        {/* Header : en flex-col sur mobile, flex-row sur large */}
+        <div className="flex flex-col md:flex-row md:items-center md:justify-between mb-6 space-y-4 md:space-y-0">
+          
+          {/* Bloc gauche : Lignes + Search + Status */}
+          <div className="flex flex-col sm:flex-row items-start sm:items-center space-y-2 sm:space-y-0 sm:space-x-4">
+            
+            {/* Bouton "All Lines" + Dropdown */}
+            <div className="relative" ref={dropdownRef}>
               <button
-                onClick={() => setSelectedLine('all')}
-                className={`px-4 py-2 rounded-md text-sm font-medium ${
-                  selectedLine === 'all'
+                onClick={toggleLineDropdown}
+                className={`px-4 py-2 rounded-md text-sm font-medium focus:outline-none ${
+                  selectedLine === 'all' && selectedFilters.length === 0
                     ? 'bg-blue-100 text-blue-700'
                     : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
                 }`}
               >
-                All Lines
+                {selectedLine === 'all' && selectedFilters.length === 0
+                  ? 'All Lines'
+                  : 'Select Lines'}
               </button>
-              <div className="absolute top-full left-0 mt-2 w-48 bg-white rounded-md shadow-lg z-20">
-                {lines.map(line => (
+              {lineDropdownOpen && (
+                <div className="absolute mt-2 w-48 bg-white rounded-md shadow-lg z-20">
                   <button
-                    key={line.id}
-                    onClick={() => handleFilterSelect(line.id)}
+                    onClick={handleSelectAllLines}
                     className={`w-full text-left px-4 py-2 text-sm ${
-                      selectedFilters.includes(line.id)
+                      selectedLine === 'all' && selectedFilters.length === 0
                         ? 'bg-blue-50 text-blue-700'
                         : 'text-gray-700 hover:bg-gray-50'
                     }`}
                   >
-                    {line.name}
+                    All Lines
                   </button>
-                ))}
-              </div>
+                  <div className="border-t my-1"></div>
+                  {lines.map(line => (
+                    <button
+                      key={line.id}
+                      onClick={() => setShowLineDropdown(prev => !prev)}
+                      className={`w-full text-left px-4 py-2 text-sm ${
+                        selectedFilters.includes(line.id)
+                          ? 'bg-blue-50 text-blue-700'
+                          : 'text-gray-700 hover:bg-gray-50'
+                      }`}
+                    >
+                      {line.name}
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
+
+            {/* Barre de recherche */}
             <div className="relative">
               <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
                 <Search className="h-4 w-4 text-gray-400" />
@@ -539,24 +623,28 @@ const RealTimeMonitoring: React.FC = () => {
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 placeholder="Search machines..."
-                className="pl-10 rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
+                className="pl-9 pr-3 py-2 rounded-md border border-gray-300 focus:border-blue-500 focus:ring-blue-500 text-sm"
               />
             </div>
+
+            {/* Filtre de statut */}
             <select
               value={machineFilter}
               onChange={(e) => setMachineFilter(e.target.value as 'all' | 'running' | 'stopped')}
-              className="rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
+              className="py-2 px-3 rounded-md border border-gray-300 focus:border-blue-500 focus:ring-blue-500 text-sm"
             >
               <option value="all">All Status</option>
               <option value="running">Running</option>
               <option value="stopped">Stopped</option>
             </select>
           </div>
+          
+          {/* Bloc droit : timeRange + "Live" */}
           <div className="flex items-center space-x-4">
             <select
               value={timeRange}
               onChange={(e) => setTimeRange(e.target.value as TimeRangeType)}
-              className="rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
+              className="py-2 px-3 rounded-md border border-gray-300 focus:border-blue-500 focus:ring-blue-500 text-sm"
             >
               <option value="12h">Last 12 hours</option>
               <option value="24h">Last 24 hours</option>
@@ -569,6 +657,7 @@ const RealTimeMonitoring: React.FC = () => {
           </div>
         </div>
         
+        {/* Contenu principal */}
         <div className="bg-white rounded-lg shadow">
           <div className="p-6">
             {loading ? (
@@ -590,6 +679,7 @@ const RealTimeMonitoring: React.FC = () => {
               </div>
             )}
 
+            {/* Légende */}
             <div className="mt-4 flex items-center space-x-6">
               <div className="flex items-center">
                 <div className="w-3 h-3 bg-green-500 rounded mr-2"></div>
