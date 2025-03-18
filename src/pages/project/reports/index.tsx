@@ -1731,64 +1731,93 @@ let globalRework = 0;
           </>
         )}
 
-        {/* Detailed Reports */}
-        <div className="mt-8">
-          <h3 className="text-lg font-medium text-gray-900 mb-4">Detailed Reports</h3>
-          <div className="bg-white shadow rounded-lg divide-y divide-gray-200">
-            {[
-              {
-                id: 'oee',
-                title: 'OEE Report',
-                description: 'Detailed analysis of Overall Equipment Effectiveness',
-                path: 'oee',
-                icon: Gauge
-              },
-              {
-                id: 'production',
-                title: 'Production Report',
-                description: 'Production volumes, efficiency, and trends',
-                path: 'production',
-                icon: Package
-              },
-              {
-                id: 'quality',
-                title: 'Quality Report',
-                description: 'Quality metrics, defects analysis, and trends',
-                path: 'quality',
-                icon: AlertTriangle
-              },
-              {
-                id: 'downtime',
-                title: 'Downtime Report',
-                description: 'Analysis of stops, causes, and impact',
-                path: 'downtime',
-                icon: Clock
-              }
-            ].map(section => {
-              const Icon = section.icon;
-              return (
-                <div
-                  key={section.id}
-                  onClick={() => navigate(`/projects/${projectId}/reports/${section.path}`)}
-                  className="p-6 hover:bg-gray-50 cursor-pointer"
-                >
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center">
-                      <div className="flex-shrink-0">
-                        <Icon className="h-6 w-6 text-gray-400" />
-                      </div>
-                      <div className="ml-4">
-                        <h4 className="text-base font-medium text-gray-900">{section.title}</h4>
-                        <p className="mt-1 text-sm text-gray-500">{section.description}</p>
-                      </div>
-                    </div>
-                    <ChevronRight className="h-5 w-5 text-gray-400" />
-                  </div>
-                </div>
-              );
-            })}
+{/* Detailed Reports */}
+<div className="mt-8">
+  <h3 className="text-lg font-medium text-gray-900 mb-4">Detailed Reports</h3>
+  <div className="bg-white shadow rounded-lg divide-y divide-gray-200">
+    {[
+      {
+        id: 'oee',
+        title: 'OEE Report',
+        description: 'Detailed analysis of Overall Equipment Effectiveness',
+        path: 'oee',
+        icon: Gauge
+      },
+      {
+        id: 'production',
+        title: 'Production Report',
+        description: 'Production volumes, efficiency, and trends',
+        path: 'production',
+        icon: Package
+      },
+      {
+        id: 'quality',
+        title: 'Quality Report',
+        description: 'Quality metrics, defects analysis, and trends',
+        path: 'quality',
+        icon: AlertTriangle
+      },
+      {
+        id: 'downtime',
+        title: 'Downtime Report',
+        description: 'Analysis of stops, causes, and impact',
+        path: 'downtime',
+        icon: Clock
+      },
+      {
+        id: 'qualityCausesTracking',
+        title: 'Quality Causes Tracking',
+        description: 'Detailed analysis of quality causes and tracking',
+        path: 'qualitytracking',
+        icon: AlertTriangle // Remplacez par un autre icône si nécessaire
+      },
+      {
+        id: 'stopesCausesTracking',
+        title: 'Stops Causes Tracking',
+        description: 'Detailed analysis of stops causes and tracking',
+        path: 'stopstracking',
+        icon: Clock // Remplacez par un autre icône si nécessaire
+      },
+      {
+        id: 'qualityPareto',
+        title: 'Quality Pareto',
+        description: 'Detailed analysis of quality pareto',
+        path: 'qualitypareto',
+        icon: AlertTriangle // Remplacez par un autre icône si nécessaire
+      },
+      {
+        id: 'stopspareto',
+        title: 'Stops Pareto',
+        description: 'Detailed analysis of stops pareto',
+        path: 'stopspareto',
+        icon: Clock // Remplacez par un autre icône si nécessaire
+      }
+    ].map(section => {
+      const Icon = section.icon;
+      return (
+        <div
+          key={section.id}
+          onClick={() => navigate(`/projects/${projectId}/reports/${section.path}`)}
+          className="p-6 hover:bg-gray-50 cursor-pointer"
+        >
+          <div className="flex items-center justify-between">
+            <div className="flex items-center">
+              <div className="flex-shrink-0">
+                <Icon className="h-6 w-6 text-gray-400" />
+              </div>
+              <div className="ml-4">
+                <h4 className="text-base font-medium text-gray-900">{section.title}</h4>
+                <p className="mt-1 text-sm text-gray-500">{section.description}</p>
+              </div>
+            </div>
+            <ChevronRight className="h-5 w-5 text-gray-400" />
           </div>
         </div>
+      );
+    })}
+  </div>
+</div>
+
 
         {/* Modals */}
         <ComparisonModal

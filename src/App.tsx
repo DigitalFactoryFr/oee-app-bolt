@@ -35,6 +35,10 @@ import SelectLotQuality from './pages/project/quality/SelectLot';
 import QualityIssuesPage from './pages/project/quality';
 import ReportsPage from './pages/project/reports';
 import RealTimeMonitoring from './pages/project/reports/RealTimeMonitoring';
+import QualityCausesTracking from './pages/project/reports/QualityCausesTracking';
+import StopsCausesTracking from './pages/project/reports/StopsCausesTracking';
+import QualityPareto from './pages/project/reports/QualityPareto';
+import StopsPareto from './pages/project/reports/StopsPareto';
 import OEEReport from './pages/project/reports/OEEReport';
 import OEEDraft from './pages/project/reports/OEEDraft';
 import ProductionReport from './pages/project/reports/ProductionReport';
@@ -219,6 +223,26 @@ function App() {
         <Route path="/projects/:projectId/reports/predictive" element={
           <ProtectedRoute>
             <PredictiveMaintenance />
+          </ProtectedRoute>
+        } />
+             <Route path="/projects/:projectId/reports/qualitytracking" element={
+          <ProtectedRoute>
+            <QualityCausesTracking />
+          </ProtectedRoute>
+        } />
+             <Route path="/projects/:projectId/reports/stopstracking" element={
+          <ProtectedRoute>
+            <StopsCausesTracking />
+          </ProtectedRoute>
+        } />
+         <Route path="/projects/:projectId/reports/qualitypareto" element={
+          <ProtectedRoute>
+            <QualityPareto />
+          </ProtectedRoute>
+        } />
+         <Route path="/projects/:projectId/reports/stopspareto" element={
+          <ProtectedRoute>
+            <StopsPareto />
           </ProtectedRoute>
         } />
 

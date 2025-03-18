@@ -1,366 +1,631 @@
 import React, { useState, useEffect } from 'react';
 import { useParams } from 'react-router-dom';
-import { format, subDays } from 'date-fns';
-import { Calendar, Download, Filter, ChevronDown, Activity, ArrowUp, ArrowDown, AlertCircle } from 'lucide-react';
-import ProjectLayout from '../../../components/layout/ProjectLayout';
-import OEEChart from '../../../components/charts/OEEChart';
-import { supabase } from '../../../lib/supabase';
+import {
+  format,
+  subDays,
+  startOfToday,
+  startOfYesterday,
+  differenceInMinutes
+} from 'date-fns';
+import {
+  Calendar,
+  ChevronDown,
+  Filter,
+  Download,
+  Search,
+  ArrowUp,
+  ArrowDown,
+  Activity
+} from 'lucide-react';
 
+import { supabase } from '../../../lib/supabase';
+import ProjectLayout from '../../../components/layout/ProjectLayout';
+import FilterPanel from '../../../components/reports/FilterPanel';
+import OEEChart from '../../../components/charts/OEEChart';
+
+// -------------------- Types --------------------
 interface OEEData {
   date: string;
-  oee: number;
-  availability: number;
-  performance: number;
-  quality: number;
+  oee: number;           // 0..100
+  availability: number;  // 0..100
+  performance: number;   // 0..100
+  quality: number;       // 0..100
 }
 
 interface MachineOEEMetrics {
-  name: string;
-  oee: number;
-  availability: number;
-  performance: number;
-  quality: number;
-  trend: number;
+  machineId: string;
+  machineName: string;
+  oee: number;           // 0..100
+  availability: number;  // 0..100
+  performance: number;   // 0..100
+  quality: number;       // 0..100
+  trend: number;         // Différence (points de %) entre le dernier jour et l'avant-dernier
   historicalData: OEEData[];
   hasData: boolean;
 }
 
-interface GlobalOEEMetrics {
-  oee: number;
-  availability: number;
-  performance: number;
-  quality: number;
-  trend: number;
-  hasData: boolean;
+interface FilterOptions {
+  machines: string[];
+  lines: string[];
+  products: string[];
+  teams: string[];
 }
 
-type TimeRangeType = 'week' | 'month' | 'quarter';
+type PeriodType = 'today' | 'yesterday' | 'week' | 'month' | 'quarter';
 
 const OEEReport: React.FC = () => {
   const { projectId } = useParams<{ projectId: string }>();
-  const [selectedPeriod, setSelectedPeriod] = useState<TimeRangeType>('week');
+
+  // --- Période ---
+  const [selectedPeriod, setSelectedPeriod] = useState<PeriodType>('week');
   const [showPeriodDropdown, setShowPeriodDropdown] = useState(false);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [machineMetrics, setMachineMetrics] = useState<Record<string, MachineOEEMetrics>>({});
-  const [globalMetrics, setGlobalMetrics] = useState<GlobalOEEMetrics>({
-    oee: 0,
-    availability: 0,
-    performance: 0,
-    quality: 0,
-    trend: 0,
-    hasData: false
+
+  // --- Filtres ---
+  const [showFilterPanel, setShowFilterPanel] = useState(false);
+  const [filterOptions, setFilterOptions] = useState<FilterOptions>({
+    machines: [],
+    lines: [],
+    products: [],
+    teams: []
+  });
+  const [selectedFilters, setSelectedFilters] = useState<FilterOptions>({
+    machines: [],
+    lines: [],
+    products: [],
+    teams: []
   });
 
-  useEffect(() => {
-    loadData();
-  }, [projectId, selectedPeriod]);
+  // --- Recherche machine ---
+  const [machineSearch, setMachineSearch] = useState('');
 
-  const loadData = async () => {
+  // --- Données ---
+  const [machineMetrics, setMachineMetrics] = useState<MachineOEEMetrics[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [hasData, setHasData] = useState(false);
+
+  // -----------------------------------------------------------
+  // Helpers pour récupérer IDs depuis des noms
+  // -----------------------------------------------------------
+  async function getMachineIdsByName(names: string[]): Promise<string[]> {
+    if (!names.length) return [];
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (names.every(n => uuidRegex.test(n))) return names;
+    const { data, error } = await supabase
+      .from('machines')
+      .select('id, name')
+      .eq('project_id', projectId)
+      .in('name', names);
+    if (error) {
+      console.error('getMachineIdsByName error:', error);
+      return [];
+    }
+    return data?.map((m: any) => m.id) || [];
+  }
+
+  async function getLineIdsByName(names: string[]): Promise<string[]> {
+    if (!names.length) return [];
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (names.every(n => uuidRegex.test(n))) return names;
+    const { data, error } = await supabase
+      .from('production_lines')
+      .select('id, name')
+      .eq('project_id', projectId)
+      .in('name', names);
+    if (error) {
+      console.error('getLineIdsByName error:', error);
+      return [];
+    }
+    return data?.map((l: any) => l.id) || [];
+  }
+
+  async function getProductIdsByName(names: string[]): Promise<string[]> {
+    if (!names.length) return [];
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (names.every(n => uuidRegex.test(n))) return names;
+    const { data, error } = await supabase
+      .from('products')
+      .select('id, name')
+      .eq('project_id', projectId)
+      .in('name', names);
+    if (error) {
+      console.error('getProductIdsByName error:', error);
+      return [];
+    }
+    return data?.map((p: any) => p.id) || [];
+  }
+
+  async function getTeamMemberIdsByTeamName(names: string[]): Promise<string[]> {
+    if (!names.length) return [];
+    const { data, error } = await supabase
+      .from('team_members')
+      .select('id, team_name')
+      .eq('project_id', projectId)
+      .in('team_name', names);
+    if (error) {
+      console.error('getTeamMemberIdsByTeamName error:', error);
+      return [];
+    }
+    return data?.map((t: any) => t.id) || [];
+  }
+
+  // -----------------------------------------------------------
+  // Calculer la plage de dates
+  // -----------------------------------------------------------
+  function getDateRange(period: PeriodType) {
+    const now = new Date();
+    switch (period) {
+      case 'today':
+        return { startDate: startOfToday(), endDate: now };
+      case 'yesterday':
+        return { startDate: startOfYesterday(), endDate: startOfToday() };
+      case 'week':
+        return { startDate: subDays(now, 7), endDate: now };
+      case 'month':
+        return { startDate: subDays(now, 30), endDate: now };
+      case 'quarter':
+      default:
+        return { startDate: subDays(now, 90), endDate: now };
+    }
+  }
+
+  // -----------------------------------------------------------
+  // Charger les options de filtre
+  // -----------------------------------------------------------
+  async function loadFilterOptions() {
     if (!projectId) return;
+    try {
+      const [machRes, lineRes, prodRes, teamRes] = await Promise.all([
+        supabase.from('machines').select('id, name').eq('project_id', projectId),
+        supabase.from('production_lines').select('id, name').eq('project_id', projectId),
+        supabase.from('products').select('id, name').eq('project_id', projectId),
+        supabase.from('team_members').select('id, team_name').eq('project_id', projectId)
+      ]);
+      setFilterOptions({
+        machines: Array.from(new Set(machRes.data?.map((m: any) => m.name) || [])),
+        lines: Array.from(new Set(lineRes.data?.map((l: any) => l.name) || [])),
+        products: Array.from(new Set(prodRes.data?.map((p: any) => p.name) || [])),
+        teams: Array.from(new Set(teamRes.data?.map((t: any) => t.team_name) || []))
+      });
+    } catch (err) {
+      console.error('Error loading filter options:', err);
+    }
+  }
 
+  // -----------------------------------------------------------
+  // Charger les données OEE
+  // -----------------------------------------------------------
+  async function loadData() {
+    if (!projectId) return;
     try {
       setLoading(true);
       setError(null);
 
-      // First check if we have any data
+      // Vérifier la présence de lots
       const { count, error: countError } = await supabase
         .from('lots')
         .select('*', { count: 'exact', head: true })
         .eq('project_id', projectId);
-
       if (countError) throw countError;
+      if (!count || count === 0) {
+        setHasData(false);
+        setMachineMetrics([]);
+        setLoading(false);
+        return;
+      }
+      setHasData(true);
 
-      // If no data exists, set empty state and return early
-      if (count === 0) {
-        setMachineMetrics({});
-        setGlobalMetrics({
-          oee: 0,
-          availability: 0,
-          performance: 0,
-          quality: 0,
-          trend: 0,
-          hasData: false
-        });
+      // Charger la liste de machines filtrée
+      let machineQuery = supabase
+        .from('machines')
+        .select('id, name, opening_time_minutes')
+        .eq('project_id', projectId);
+
+      // Filtre par lignes
+      if (selectedFilters.lines.length > 0) {
+        const lineIDs = await getLineIdsByName(selectedFilters.lines);
+        if (lineIDs.length > 0) {
+          machineQuery = machineQuery.in('line_id', lineIDs);
+        }
+      }
+      // Filtre par machines
+      if (selectedFilters.machines.length > 0) {
+        const machineIDs = await getMachineIdsByName(selectedFilters.machines);
+        if (machineIDs.length > 0) {
+          machineQuery = machineQuery.in('id', machineIDs);
+        }
+      }
+
+      const { data: machines, error: machineError } = await machineQuery;
+      if (machineError) throw machineError;
+      if (!machines || machines.length === 0) {
+        setHasData(false);
+        setMachineMetrics([]);
         setLoading(false);
         return;
       }
 
-      // Calculate date ranges
-      const endDate = new Date();
-      let startDate: Date;
+      // Plage de dates
+      const { startDate, endDate } = getDateRange(selectedPeriod);
 
-      switch (selectedPeriod) {
-        case 'week':
-          startDate = subDays(endDate, 7);
-          break;
-        case 'month':
-          startDate = subDays(endDate, 30);
-          break;
-        case 'quarter':
-          startDate = subDays(endDate, 90);
-          break;
-        default:
-          startDate = subDays(endDate, 7);
-      }
+      // Filtre sur produits / équipes
+      const productIDs = selectedFilters.products.length
+        ? await getProductIdsByName(selectedFilters.products)
+        : [];
+      const teamIDs = selectedFilters.teams.length
+        ? await getTeamMemberIdsByTeamName(selectedFilters.teams)
+        : [];
 
-      // Fetch machines with their names
-      const { data: machines, error: machinesError } = await supabase
-        .from('machines')
-        .select('id, name')
-        .eq('project_id', projectId);
+      const metricsArray: MachineOEEMetrics[] = [];
 
-      if (machinesError) throw machinesError;
-
-      const metricsData: Record<string, MachineOEEMetrics> = {};
-      let globalTotalOEE = 0;
-      let globalTotalAvailability = 0;
-      let globalTotalQuality = 0;
-      let globalTotalPerformance = 0;
-      let globalDataCount = 0;
-
+      // Boucle sur chaque machine
       for (const machine of machines) {
-        // Fetch lots, stops, and product info for the machine
-        const [lotsResult, stopsResult, productResult] = await Promise.all([
-          supabase
-            .from('lots')
-            .select(`
-              id,
-              date,
-              start_time,
-              end_time,
-              lot_size,
-              ok_parts_produced,
-              products (cycle_time)
-            `)
-            .eq('machine', machine.id)
-            .gte('date', format(startDate, 'yyyy-MM-dd'))
-            .lte('date', format(endDate, 'yyyy-MM-dd')),
-          supabase
-            .from('stop_events')
-            .select('*')
-            .eq('machine', machine.id)
-            .eq('failure_type', 'AP') // Only planned stops
-            .gte('date', format(startDate, 'yyyy-MM-dd'))
-            .lte('date', format(endDate, 'yyyy-MM-dd')),
-          supabase
-            .from('machines')
-            .select('opening_time_minutes')
-            .eq('id', machine.id)
-            .single()
-        ]);
+        let lotsQuery = supabase
+          .from('lots')
+          .select(`
+            id,
+            start_time,
+            end_time,
+            lot_size,
+            ok_parts_produced,
+            date,
+            products:product ( cycle_time )
+          `)
+          .eq('project_id', projectId)
+          .eq('machine', machine.id)
+          .gte('start_time', startDate.toISOString())
+          .lte('start_time', endDate.toISOString());
 
+        let stopsQuery = supabase
+          .from('stop_events')
+          .select(`
+            id,
+            start_time,
+            end_time,
+            failure_type,
+            date
+          `)
+          .eq('project_id', projectId)
+          .eq('machine', machine.id)
+          .gte('start_time', startDate.toISOString())
+          .lte('start_time', endDate.toISOString());
+
+        let qualityQuery = supabase
+          .from('quality_issues')
+          .select(`
+            id,
+            date,
+            category,
+            quantity
+          `)
+          .eq('project_id', projectId)
+          .eq('machine', machine.id)
+          .gte('date', format(startDate, 'yyyy-MM-dd'))
+          .lte('date', format(endDate, 'yyyy-MM-dd'));
+
+        // Filtres sur produits
+        if (productIDs.length > 0) {
+          lotsQuery = lotsQuery.in('product', productIDs);
+          stopsQuery = stopsQuery.in('product', productIDs);
+          qualityQuery = qualityQuery.in('product', productIDs);
+        }
+        // Filtres sur équipes
+        if (teamIDs.length > 0) {
+          lotsQuery = lotsQuery.in('team_member', teamIDs);
+          stopsQuery = stopsQuery.in('team_member', teamIDs);
+          qualityQuery = qualityQuery.in('team_member', teamIDs);
+        }
+
+        // Exécution en parallèle
+        const [lotsResult, stopsResult, qualityResult] = await Promise.all([
+          lotsQuery,
+          stopsQuery,
+          qualityQuery
+        ]);
         if (lotsResult.error) throw lotsResult.error;
         if (stopsResult.error) throw stopsResult.error;
-        if (productResult.error) throw productResult.error;
+        if (qualityResult.error) throw qualityResult.error;
 
-        const dateMap = new Map<string, OEEData>();
-        let totalOEE = 0;
-        let totalAvailability = 0;
-        let totalQuality = 0;
-        let totalPerformance = 0;
-        let daysWithData = 0;
+        // dateMap
+        const dateMap = new Map<string, {
+          date: string;
+          plannedTime: number;
+          plannedStops: number;
+          unplannedStops: number;
+          okParts: number;
+          scrapParts: number;
+          netTimeSec: number;
+        }>();
 
-        // Initialize data for each date
-        let currentDate = new Date(startDate);
-        while (currentDate <= endDate) {
-          const dateStr = format(currentDate, 'yyyy-MM-dd');
-          dateMap.set(dateStr, {
-            date: dateStr,
-            oee: 0,
-            availability: 100,
-            performance: 0,
-            quality: 100
-          });
-          currentDate.setDate(currentDate.getDate() + 1);
-        }
-
-        // Process each date's data
-        dateMap.forEach((data, date) => {
-          const dayLots = lotsResult.data?.filter(lot => lot.date === date) || [];
-          const dayStops = stopsResult.data?.filter(stop => stop.date === date) || [];
-
-          if (dayLots.length === 0) return; // Skip days without data
-
-          // Calculate total opening time in minutes
-          const openingTime = productResult.data?.opening_time_minutes || 480; // Default 8 hours
-
-          // Calculate planned downtime
-          const plannedDowntime = dayStops.reduce((total, stop) => {
-            const start = new Date(stop.start_time);
-            const end = stop.end_time ? new Date(stop.end_time) : new Date();
-            return total + (end.getTime() - start.getTime()) / (1000 * 60);
-          }, 0);
-
-          // Calculate actual production time
-          const availableTime = openingTime - plannedDowntime;
-          
-          // Calculate OEE components for each lot
-          let totalOKParts = 0;
-          let totalParts = 0;
-          let theoreticalCycleTime = 0;
-
-          dayLots.forEach(lot => {
-            totalOKParts += lot.ok_parts_produced;
-            totalParts += lot.lot_size;
-            theoreticalCycleTime = lot.products.cycle_time;
-          });
-
-          // Calculate metrics only if we have production data
-          if (totalParts > 0) {
-            daysWithData++;
-
-            // Quality = Good Parts / Total Parts
-            data.quality = (totalOKParts / totalParts) * 100;
-
-            // Availability = Actual Production Time / Planned Production Time
-            data.availability = (availableTime / openingTime) * 100;
-
-            // Calculate theoretical production time
-            const theoreticalProductionTime = (theoreticalCycleTime * totalParts) / 60; // Convert to minutes
-
-            // Calculate actual production time
-            const actualProductionTime = (theoreticalCycleTime * totalOKParts) / 60;
-
-            // Calculate Performance
-            data.performance = (actualProductionTime / theoreticalProductionTime) * 100;
-
-            // Calculate OEE
-            data.oee = (data.availability * data.performance * data.quality) / 10000;
-
-            // Update totals
-            totalOEE += data.oee;
-            totalAvailability += data.availability;
-            totalQuality += data.quality;
-            totalPerformance += data.performance;
+        // 1) Parcourir les lots
+        lotsResult.data?.forEach((lot: any) => {
+          const dayStr = lot.date || format(new Date(lot.start_time), 'yyyy-MM-dd');
+          if (!dateMap.has(dayStr)) {
+            dateMap.set(dayStr, {
+              date: dayStr,
+              plannedTime: 0,
+              plannedStops: 0,
+              unplannedStops: 0,
+              okParts: 0,
+              scrapParts: 0,
+              netTimeSec: 0
+            });
           }
+          const obj = dateMap.get(dayStr)!;
+          // Durée planifiée
+          const st = new Date(lot.start_time);
+          const et = lot.end_time ? new Date(lot.end_time) : new Date();
+          const durMin = Math.max(0, differenceInMinutes(et, st));
+          obj.plannedTime += durMin;
 
-          // Ensure all metrics are between 0 and 100
-          data.availability = Math.min(100, Math.max(0, data.availability));
-          data.performance = Math.min(100, Math.max(0, data.performance));
-          data.quality = Math.min(100, Math.max(0, data.quality));
-          data.oee = Math.min(100, Math.max(0, data.oee));
+          // Temps net théorique
+          if (lot.products?.cycle_time && lot.ok_parts_produced > 0) {
+            obj.netTimeSec += lot.ok_parts_produced * lot.products.cycle_time;
+          }
+          // Pièces OK
+          obj.okParts += lot.ok_parts_produced;
         });
 
-        // Calculate trend and store metrics
-        const historicalData = Array.from(dateMap.values())
+        // 2) Parcourir les arrêts
+        stopsResult.data?.forEach((stop: any) => {
+          const dayStr = stop.date || format(new Date(stop.start_time), 'yyyy-MM-dd');
+          if (!dateMap.has(dayStr)) {
+            dateMap.set(dayStr, {
+              date: dayStr,
+              plannedTime: 0,
+              plannedStops: 0,
+              unplannedStops: 0,
+              okParts: 0,
+              scrapParts: 0,
+              netTimeSec: 0
+            });
+          }
+          const obj = dateMap.get(dayStr)!;
+          const st = new Date(stop.start_time);
+          const et = stop.end_time ? new Date(stop.end_time) : new Date();
+          const durMin = Math.max(0, differenceInMinutes(et, st));
+
+          // Arrêt planifié => PA
+          if (stop.failure_type === 'PA') {
+            obj.plannedStops += durMin;
+          }
+          // Sinon unplanned
+          obj.unplannedStops += durMin;
+        });
+
+        // 3) Parcourir la qualité (scrap)
+        qualityResult.data?.forEach((issue: any) => {
+          const dayStr = issue.date;
+          if (!dateMap.has(dayStr)) {
+            dateMap.set(dayStr, {
+              date: dayStr,
+              plannedTime: 0,
+              plannedStops: 0,
+              unplannedStops: 0,
+              okParts: 0,
+              scrapParts: 0,
+              netTimeSec: 0
+            });
+          }
+          const obj = dateMap.get(dayStr)!;
+          if (issue.category === 'scrap') {
+            obj.scrapParts += issue.quantity;
+          }
+        });
+
+        // 4) Calculer A, P, Q, OEE par jour
+        const historicalData: OEEData[] = [];
+        let sumA = 0, sumP = 0, sumQ = 0, sumOEE = 0;
+        let dayCount = 0;
+
+        Array.from(dateMap.values())
           .sort((a, b) => a.date.localeCompare(b.date))
-          .filter(data => data.oee > 0); // Only include days with data
+          .forEach(d => {
+            const plannedProdTime = Math.max(0, d.plannedTime - d.plannedStops);
+            const runTime = Math.max(0, d.plannedTime - d.unplannedStops);
 
-        const lastDay = historicalData[historicalData.length - 1]?.oee || 0;
-        const previousDay = historicalData[historicalData.length - 2]?.oee || 0;
-        const trend = lastDay - previousDay;
+            // Availability
+            let A = 0;
+            if (plannedProdTime > 0) {
+              A = (runTime / plannedProdTime) * 100;
+            }
 
-        if (daysWithData > 0) {
-          metricsData[machine.id] = {
-            name: machine.name,
-            oee: totalOEE / daysWithData,
-            availability: totalAvailability / daysWithData,
-            quality: totalQuality / daysWithData,
-            performance: totalPerformance / daysWithData,
-            trend,
-            historicalData,
-            hasData: daysWithData > 0
-          };
+            // Performance
+            let netMin = d.netTimeSec / 60; // temps théorique
+            let P = 0;
+            if (runTime > 0) {
+              P = (netMin / runTime) * 100;
+              if (P > 100) P = 100;
+            }
 
-          // Update global totals
-          globalTotalOEE += totalOEE;
-          globalTotalAvailability += totalAvailability;
-          globalTotalQuality += totalQuality;
-          globalTotalPerformance += totalPerformance;
-          globalDataCount += daysWithData;
+            // Quality
+            const totParts = d.okParts + d.scrapParts;
+            let Q = totParts > 0 ? (d.okParts / totParts) * 100 : 100;
+
+            // OEE = (A * P * Q) / 10,000 => [0..100]
+            const dailyOEE = (A * P * Q) / 10000;
+
+            if (totParts > 0) {
+              dayCount++;
+              sumA += A;
+              sumP += P;
+              sumQ += Q;
+              sumOEE += dailyOEE;
+            }
+
+            historicalData.push({
+              date: d.date,
+              availability: A,
+              performance: P,
+              quality: Q,
+              oee: dailyOEE // 0..100
+            });
+          });
+
+        // Moyennes
+        let avgA = 0, avgP = 0, avgQ = 0, avgOEE = 0;
+        if (dayCount > 0) {
+          avgA = sumA / dayCount;       // 0..100
+          avgP = sumP / dayCount;       // 0..100
+          avgQ = sumQ / dayCount;       // 0..100
+          avgOEE = sumOEE / dayCount;   // 0..100
         }
-      }
 
-      // Calculate global metrics
-      if (globalDataCount > 0) {
-        setGlobalMetrics({
-          oee: globalTotalOEE / globalDataCount,
-          availability: globalTotalAvailability / globalDataCount,
-          quality: globalTotalQuality / globalDataCount,
-          performance: globalTotalPerformance / globalDataCount,
-          trend: 0, // Calculate global trend if needed
-          hasData: true
+        // Tendance
+        historicalData.sort((a, b) => a.date.localeCompare(b.date));
+        const lastDay = historicalData[historicalData.length - 1]?.oee || 0;
+        const prevDay = historicalData[historicalData.length - 2]?.oee || 0;
+        const trend = lastDay - prevDay; // en points de %
+
+        metricsArray.push({
+          machineId: machine.id,
+          machineName: machine.name,
+          oee: avgOEE,           // 0..100
+          availability: avgA,    // 0..100
+          performance: avgP,     // 0..100
+          quality: avgQ,         // 0..100
+          trend: trend,
+          historicalData,
+          hasData: dayCount > 0
         });
       }
 
-      setMachineMetrics(metricsData);
+      setMachineMetrics(metricsArray);
       setLoading(false);
     } catch (err) {
-      console.error('Error loading OEE data:', err);
-      setError(err instanceof Error ? err.message : 'Failed to load OEE data');
+      console.error('Error loading data:', err);
+      setError(err instanceof Error ? err.message : 'Failed to load data');
       setLoading(false);
     }
+  }
+
+  // -----------------------------------------------------------
+  // Filtrage local (champ de recherche machine)
+  // -----------------------------------------------------------
+  const filteredMachines = machineMetrics.filter(m =>
+    m.machineName.toLowerCase().includes(machineSearch.toLowerCase())
+  );
+
+  // -----------------------------------------------------------
+  // Gestion des filtres
+  // -----------------------------------------------------------
+  const handleFilterChange = (category: string, values: string[]) => {
+    setSelectedFilters(prev => ({ ...prev, [category]: values }));
+  };
+  const handleClearFilters = () => {
+    setSelectedFilters({ machines: [], lines: [], products: [], teams: [] });
   };
 
-  const getMetricColor = (value: number) => {
-    if (value >= 95) return 'text-green-600';
-    if (value >= 85) return 'text-blue-600';
-    if (value >= 75) return 'text-yellow-600';
-    return 'text-red-600';
-  };
+  // -----------------------------------------------------------
+  // Export JSON (optionnel)
+  // -----------------------------------------------------------
+  function handleExport() {
+    const exportData = {
+      machineMetrics
+    };
+    const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `oee_report_${format(new Date(), 'yyyy-MM-dd')}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
 
-  const getMetricBgColor = (value: number) => {
-    if (value >= 95) return 'bg-green-50';
-    if (value >= 85) return 'bg-blue-50';
-    if (value >= 75) return 'bg-yellow-50';
-    return 'bg-red-50';
-  };
+  // -----------------------------------------------------------
+  // useEffect : charger filtres + data
+  // -----------------------------------------------------------
+  useEffect(() => {
+    if (projectId) {
+      loadFilterOptions();
+      loadData();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectId, selectedPeriod, selectedFilters]);
 
+  // -----------------------------------------------------------
+  // Rendu principal
+  // -----------------------------------------------------------
   return (
     <ProjectLayout>
       <div className="py-8 px-4 sm:px-6 lg:px-8">
+        
         {/* Header */}
-        <div className="flex items-center justify-between mb-6">
+        <div className="flex flex-col md:flex-row md:items-center md:justify-between mb-6 space-y-4 md:space-y-0">
           <div>
             <h2 className="text-2xl font-bold text-gray-900">OEE Report</h2>
             <p className="mt-1 text-sm text-gray-500">
               Detailed analysis of Overall Equipment Effectiveness by machine
             </p>
           </div>
-          <div className="flex items-center space-x-3">
+
+          {/* Boutons Période / Filtres / Export */}
+          <div className="flex flex-col sm:flex-row sm:space-x-3 space-y-2 sm:space-y-0">
+            {/* Sélecteur de période */}
             <div className="relative">
               <button
                 onClick={() => setShowPeriodDropdown(!showPeriodDropdown)}
-                className="inline-flex items-center px-4 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
+                className="inline-flex items-center px-4 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium 
+                  text-gray-700 bg-white hover:bg-gray-50"
               >
                 <Calendar className="h-4 w-4 mr-2" />
-                {selectedPeriod === 'week' ? 'Last 7 days' : 
-                 selectedPeriod === 'month' ? 'Last 30 days' : 
-                 'Last 90 days'}
+                {selectedPeriod === 'today'
+                  ? 'Today'
+                  : selectedPeriod === 'yesterday'
+                  ? 'Yesterday'
+                  : selectedPeriod === 'week'
+                  ? 'Last 7 days'
+                  : selectedPeriod === 'month'
+                  ? 'Last 30 days'
+                  : 'Last 90 days'}
                 <ChevronDown className="ml-2 h-4 w-4" />
               </button>
               {showPeriodDropdown && (
-                <div className="absolute right-0 mt-2 w-48 rounded-md shadow-lg bg-white ring-1 ring-black ring-opacity-5 z-10">
+                // Z-50 pour que le dropdown soit devant le chart
+                <div className="absolute right-0 mt-2 w-48 rounded-md shadow-lg bg-white ring-1 ring-black ring-opacity-5 z-50">
                   <div className="py-1">
-                    {[
-                      { value: 'week', label: 'Last 7 days' },
-                      { value: 'month', label: 'Last 30 days' },
-                      { value: 'quarter', label: 'Last 90 days' }
-                    ].map((period) => (
+                    {(['today', 'yesterday', 'week', 'month', 'quarter'] as PeriodType[]).map(period => (
                       <button
-                        key={period.value}
+                        key={period}
                         onClick={() => {
-                          setSelectedPeriod(period.value as TimeRangeType);
+                          setSelectedPeriod(period);
                           setShowPeriodDropdown(false);
                         }}
                         className="block w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
                       >
-                        {period.label}
+                        {period === 'today'
+                          ? 'Today'
+                          : period === 'yesterday'
+                          ? 'Yesterday'
+                          : period === 'week'
+                          ? 'Last 7 days'
+                          : period === 'month'
+                          ? 'Last 30 days'
+                          : 'Last 90 days'}
                       </button>
                     ))}
                   </div>
                 </div>
               )}
             </div>
+
+            {/* Bouton Filtres */}
             <button
-              className="inline-flex items-center px-4 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
+              onClick={() => setShowFilterPanel(true)}
+              className="inline-flex items-center px-4 py-2 border rounded-md shadow-sm text-sm font-medium
+                border-gray-300 text-gray-700 bg-white hover:bg-gray-50"
             >
               <Filter className="h-4 w-4 mr-2" />
               Filters
             </button>
+
+            {/* Bouton Export */}
             <button
-              className="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700"
+              onClick={handleExport}
+              className="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium
+                text-white bg-blue-600 hover:bg-blue-700"
             >
               <Download className="h-4 w-4 mr-2" />
               Export
@@ -368,8 +633,38 @@ const OEEReport: React.FC = () => {
           </div>
         </div>
 
+        {/* Panneau de filtres */}
+        {showFilterPanel && (
+          <FilterPanel
+            isVisible={showFilterPanel}
+            onClose={() => setShowFilterPanel(false)}
+            options={filterOptions}
+            selectedFilters={selectedFilters}
+            onFilterChange={handleFilterChange}
+            onClearFilters={handleClearFilters}
+          />
+        )}
+
+        {/* Champ de recherche machine */}
+        <div className="mb-4">
+          <div className="relative max-w-sm">
+            <input
+              type="text"
+              placeholder="Search machine..."
+              value={machineSearch}
+              onChange={(e) => setMachineSearch(e.target.value)}
+              className="block w-full pl-9 pr-3 py-2 border border-gray-300 rounded-md shadow-sm 
+                         focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 text-sm"
+            />
+            <div className="absolute inset-y-0 left-0 pl-2 flex items-center pointer-events-none text-gray-400">
+              <Search className="h-4 w-4" />
+            </div>
+          </div>
+        </div>
+
+        {/* Contenu principal */}
         {loading ? (
-          <div className="flex justify-center items-center h-64">
+          <div className="flex justify-center items-center h-24">
             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
           </div>
         ) : error ? (
@@ -381,110 +676,97 @@ const OEEReport: React.FC = () => {
               </div>
             </div>
           </div>
-        ) : !globalMetrics.hasData ? (
+        ) : !hasData ? (
           <div className="bg-gray-50 rounded-lg p-8 text-center">
-            <AlertCircle className="mx-auto h-12 w-12 text-gray-400" />
+            <Activity className="mx-auto h-12 w-12 text-gray-400" />
             <h3 className="mt-2 text-lg font-medium text-gray-900">No Production Data</h3>
             <p className="mt-1 text-sm text-gray-500">
               Start recording production data to see OEE metrics and analysis.
             </p>
           </div>
         ) : (
-          <div className="space-y-6">
-            {/* Global OEE Summary */}
-            <div className="bg-white rounded-lg shadow-sm overflow-hidden">
-              <div className="px-6 py-4 border-b border-gray-200">
-                <h3 className="text-lg font-medium text-gray-900">Global Performance</h3>
-              </div>
-              <div className="p-6">
-                <div className="grid grid-cols-2 lg:grid-cols-4 gap-6">
-                  <div className={`${getMetricBgColor(globalMetrics.oee)} rounded-lg p-4`}>
-                    <h4 className="text-sm font-medium text-gray-500">Global OEE</h4>
-                    <p className={`text-3xl font-bold ${getMetricColor(globalMetrics.oee)}`}>
-                      {globalMetrics.oee.toFixed(1)}%
-                    </p>
-                  </div>
-                  <div className={`${getMetricBgColor(globalMetrics.availability)} rounded-lg p-4`}>
-                    <h4 className="text-sm font-medium text-gray-500">Global Availability</h4>
-                    <p className={`text-3xl font-bold ${getMetricColor(globalMetrics.availability)}`}>
-                      {globalMetrics.availability.toFixed(1)}%
-                    </p>
-                  </div>
-                  <div className={`${getMetricBgColor(globalMetrics.performance)} rounded-lg p-4`}>
-                    <h4 className="text-sm font-medium text-gray-500">Global Performance</h4>
-                    <p className={`text-3xl font-bold ${getMetricColor(globalMetrics.performance)}`}>
-                      {globalMetrics.performance.toFixed(1)}%
-                    </p>
-                  </div>
-                  <div className={`${getMetricBgColor(globalMetrics.quality)} rounded-lg p-4`}>
-                    <h4 className="text-sm font-medium text-gray-500">Global Quality</h4>
-                    <p className={`text-3xl font-bold ${getMetricColor(globalMetrics.quality)}`}>
-                      {globalMetrics.quality.toFixed(1)}%
-                    </p>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* Machine Analysis */}
-            {Object.entries(machineMetrics)
-              .filter(([_, metrics]) => metrics.hasData)
-              .map(([machineId, metrics]) => (
-                <div key={machineId} className="bg-white rounded-lg shadow-sm overflow-hidden">
-                  <div className="px-6 py-4 border-b border-gray-200">
+          <div className="space-y-12">
+            {filteredMachines.map((m) => (
+              <div
+                key={m.machineId}
+                className="bg-white shadow-sm rounded-lg p-6 mb-8 h-64 relative"
+              >
+                {/* Layout sur toute la hauteur */}
+                <div className="flex flex-col md:flex-row items-start h-full">
+                  
+                  {/* Colonne gauche : Nom + KPIs */}
+                  <div className="md:w-1/2">
                     <div className="flex items-center justify-between">
-                      <h3 className="text-lg font-medium text-gray-900">{metrics.name}</h3>
-                      {metrics.trend !== 0 && (
-                        <div className={`flex items-center ${metrics.trend >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                          {metrics.trend >= 0 ? <ArrowUp className="h-4 w-4" /> : <ArrowDown className="h-4 w-4" />}
-                          <span className="ml-1">{Math.abs(metrics.trend).toFixed(1)}%</span>
+                      <h3 className="text-lg font-bold text-gray-900">
+                        {m.machineName}
+                      </h3>
+                      {/* Tendance */}
+                      {m.trend !== 0 && (
+                        <div className={`flex items-center ${
+                          m.trend > 0 ? 'text-green-600' : 'text-red-600'
+                        }`}>
+                          {m.trend > 0 ? <ArrowUp className="h-4 w-4" /> : <ArrowDown className="h-4 w-4" />}
+                          <span className="ml-1 text-sm">
+                            {m.trend.toFixed(1)}%
+                          </span>
                         </div>
                       )}
                     </div>
-                  </div>
-                  <div className="p-6">
-                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                      {/* Metrics */}
-                      <div className="grid grid-cols-2 gap-4">
-                        <div className={`${getMetricBgColor(metrics.oee)} rounded-lg p-4`}>
-                          <h4 className="text-sm font-medium text-gray-500">OEE</h4>
-                          <p className={`text-3xl font-bold ${getMetricColor(metrics.oee)}`}>
-                            {metrics.oee.toFixed(1)}%
-                          </p>
+
+                    {m.hasData ? (
+                      <div className="grid grid-cols-2 gap-4 mt-4">
+                        {/* OEE en bleu */}
+                        <div className="text-center">
+                          <div className="text-2xl font-bold text-blue-600">
+                            {m.oee.toFixed(1)}%
+                          </div>
+                          <div className="text-sm text-gray-500">OEE</div>
                         </div>
-                        <div className={`${getMetricBgColor(metrics.availability)} rounded-lg p-4`}>
-                          <h4 className="text-sm font-medium text-gray-500">Availability</h4>
-                          <p className={`text-3xl font-bold ${getMetricColor(metrics.availability)}`}>
-                            {metrics.availability.toFixed(1)}%
-                          </p>
+
+                        {/* Availability en noir */}
+                        <div className="text-center">
+                          <div className="text-2xl font-bold text-gray-900">
+                            {m.availability.toFixed(1)}%
+                          </div>
+                          <div className="text-sm text-gray-500">Availability</div>
                         </div>
-                        <div className={`${getMetricBgColor(metrics.performance)} rounded-lg p-4`}>
-                          <h4 className="text-sm font-medium text-gray-500">Performance</h4>
-                          <p className={`text-3xl font-bold ${getMetricColor(metrics.performance)}`}>
-                            {metrics.performance.toFixed(1)}%
-                          </p>
+
+                        {/* Performance en noir */}
+                        <div className="text-center">
+                          <div className="text-2xl font-bold text-gray-900">
+                            {m.performance.toFixed(1)}%
+                          </div>
+                          <div className="text-sm text-gray-500">Performance</div>
                         </div>
-                        <div className={`${getMetricBgColor(metrics.quality)} rounded-lg p-4`}>
-                          <h4 className="text-sm font-medium text-gray-500">Quality</h4>
-                          <p className={`text-3xl font-bold ${getMetricColor(metrics.quality)}`}>
-                            {metrics.quality.toFixed(1)}%
-                          </p>
+
+                        {/* Quality en noir */}
+                        <div className="text-center">
+                          <div className="text-2xl font-bold text-gray-900">
+                            {m.quality.toFixed(1)}%
+                          </div>
+                          <div className="text-sm text-gray-500">Quality</div>
                         </div>
                       </div>
-
-                      {/* Trend Chart */}
-                      {metrics.historicalData.length > 0 && (
-                        <div className="h-64">
-                          <OEEChart
-                            data={metrics.historicalData}
-                            showComparison={false}
-                          />
-                        </div>
-                      )}
-                    </div>
+                    ) : (
+                      <p className="text-gray-500 text-sm mt-4">
+                        No data for this machine in the selected period.
+                      </p>
+                    )}
                   </div>
+
+                  {/* Colonne droite : Chart */}
+                  {/* z-0 pour ne pas recouvrir le dropdown, overflow-visible si besoin */}
+                  <div className="md:w-1/2 mt-6 md:mt-0 md:pl-6 h-full relative z-0">
+                    {m.hasData && m.historicalData.length > 0 && (
+                      <div className="w-full h-full overflow-hidden">
+                        <OEEChart data={m.historicalData} showComparison={false} />
+                      </div>
+                    )}
+                  </div>
+
                 </div>
-              ))}
+              </div>
+            ))}
           </div>
         )}
       </div>
