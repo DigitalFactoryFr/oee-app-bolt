@@ -9,8 +9,7 @@ import {
   Clock,
   PenTool as Tool,
   AlertTriangle,
-  Settings,
-  Search
+  Settings
 } from 'lucide-react';
 import ProjectLayout from '../../../components/layout/ProjectLayout';
 import DowntimeChart from '../../../components/charts/DowntimeChart';
@@ -42,7 +41,7 @@ interface MachineDowntime {
   stops: number;
   mttr: number;
   availability: number;
-  trend: number;  // Pourcentage (ex: +5 => +5%)
+  trend: number;
 }
 
 interface FailureBreakdown {
@@ -56,14 +55,16 @@ type TimeRangeType = '24h' | '7d' | '30d' | '90d';
 
 interface FilterOptions {
   machines: string[];
+  lines: string[];
   products: string[];
+  teams: string[];
 }
 
 //
 // Fonctions auxiliaires pour convertir les noms en UUIDs
 //
 async function getMachineIdsByName(names: string[], projectId: string): Promise<string[]> {
-  if (!names || names.length === 0) return [];
+  if (!names.length) return [];
   const { data, error } = await supabase
     .from('machines')
     .select('id, name')
@@ -76,8 +77,22 @@ async function getMachineIdsByName(names: string[], projectId: string): Promise<
   return data?.map((m: any) => m.id) || [];
 }
 
+async function getLineIdsByName(names: string[], projectId: string): Promise<string[]> {
+  if (!names.length) return [];
+  const { data, error } = await supabase
+    .from('production_lines')
+    .select('id, name')
+    .eq('project_id', projectId)
+    .in('name', names);
+  if (error) {
+    console.error('getLineIdsByName error:', error);
+    return [];
+  }
+  return data?.map((l: any) => l.id) || [];
+}
+
 async function getProductIdsByName(names: string[], projectId: string): Promise<string[]> {
-  if (!names || names.length === 0) return [];
+  if (!names.length) return [];
   const { data, error } = await supabase
     .from('products')
     .select('id, name')
@@ -90,13 +105,27 @@ async function getProductIdsByName(names: string[], projectId: string): Promise<
   return data?.map((p: any) => p.id) || [];
 }
 
+async function getTeamMemberIdsByTeamName(names: string[], projectId: string): Promise<string[]> {
+  if (!names.length) return [];
+  const { data, error } = await supabase
+    .from('team_members')
+    .select('id, team_name')
+    .eq('project_id', projectId)
+    .in('team_name', names);
+  if (error) {
+    console.error('getTeamMemberIdsByTeamName error:', error);
+    return [];
+  }
+  return data?.map((t: any) => t.id) || [];
+}
+
 //
 // Rapport DowntimeReport
 //
 const DowntimeReport: React.FC = () => {
   const { projectId } = useParams<{ projectId: string }>();
 
-  // --- Période
+  // --- Sélection de la période
   const [selectedPeriod, setSelectedPeriod] = useState<TimeRangeType>('7d');
   const [showPeriodDropdown, setShowPeriodDropdown] = useState(false);
 
@@ -121,15 +150,16 @@ const DowntimeReport: React.FC = () => {
   const [showFilterPanel, setShowFilterPanel] = useState(false);
   const [filterOptions, setFilterOptions] = useState<FilterOptions>({
     machines: [],
-    products: []
+    lines: [],
+    products: [],
+    teams: []
   });
   const [selectedFilters, setSelectedFilters] = useState<FilterOptions>({
     machines: [],
-    products: []
+    lines: [],
+    products: [],
+    teams: []
   });
-
-  // --- Recherche locale (pour machines)
-  const [searchTerm, setSearchTerm] = useState('');
 
   // useEffect : charger filtres et données
   useEffect(() => {
@@ -137,7 +167,6 @@ const DowntimeReport: React.FC = () => {
       loadFilterOptions();
       loadData();
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, selectedPeriod, selectedFilters]);
 
   // --------------------------------------------------------------------------
@@ -146,13 +175,19 @@ const DowntimeReport: React.FC = () => {
   const loadFilterOptions = async () => {
     if (!projectId) return;
     try {
-      const [machRes, prodRes] = await Promise.all([
+      // Récupérer la liste de machines, lines, products, teams
+      const [machRes, lineRes, prodRes, teamRes] = await Promise.all([
         supabase.from('machines').select('id, name').eq('project_id', projectId),
-        supabase.from('products').select('id, name').eq('project_id', projectId)
+        supabase.from('production_lines').select('id, name').eq('project_id', projectId),
+        supabase.from('products').select('id, name').eq('project_id', projectId),
+        supabase.from('team_members').select('id, team_name').eq('project_id', projectId)
       ]);
+
       setFilterOptions({
         machines: Array.from(new Set(machRes.data?.map((m: any) => m.name) || [])),
-        products: Array.from(new Set(prodRes.data?.map((p: any) => p.name) || []))
+        lines: Array.from(new Set(lineRes.data?.map((l: any) => l.name) || [])),
+        products: Array.from(new Set(prodRes.data?.map((p: any) => p.name) || [])),
+        teams: Array.from(new Set(teamRes.data?.map((t: any) => t.team_name) || []))
       });
     } catch (err) {
       console.error('Error loading filter options:', err);
@@ -202,18 +237,44 @@ const DowntimeReport: React.FC = () => {
 
       const { startDate, endDate } = getDateRange();
 
-      // Convertir les noms en UUID
-      let machineIDs: string[] = [];
-      let productIDs: string[] = [];
-
-      if (selectedFilters.machines?.length) {
-        machineIDs = await getMachineIdsByName(selectedFilters.machines, projectId);
+      // 1) Convertir les filtres line -> machineIDs
+      let finalMachineIDs: string[] = [];
+      // Si des lignes sont sélectionnées, on récupère les machineIDs correspondants
+      if (selectedFilters.lines.length > 0) {
+        const lineIDs = await getLineIdsByName(selectedFilters.lines, projectId);
+        if (lineIDs.length > 0) {
+          const { data: machOfLines } = await supabase
+            .from('machines')
+            .select('id, line_id')
+            .eq('project_id', projectId)
+            .in('line_id', lineIDs);
+          if (machOfLines) {
+            const lineMachineIDs = machOfLines.map((m: any) => m.id);
+            finalMachineIDs = [...finalMachineIDs, ...lineMachineIDs];
+          }
+        }
       }
-      if (selectedFilters.products?.length) {
+      // Puis on ajoute les machines sélectionnées
+      if (selectedFilters.machines.length > 0) {
+        const machineIDs = await getMachineIdsByName(selectedFilters.machines, projectId);
+        finalMachineIDs = [...finalMachineIDs, ...machineIDs];
+      }
+      // On retire les doublons
+      finalMachineIDs = Array.from(new Set(finalMachineIDs));
+
+      // 2) Convertir le filtre product
+      let productIDs: string[] = [];
+      if (selectedFilters.products.length > 0) {
         productIDs = await getProductIdsByName(selectedFilters.products, projectId);
       }
 
-      // Requête stop_events
+      // 3) Convertir le filtre team -> teamMemberIDs
+      let teamIDs: string[] = [];
+      if (selectedFilters.teams.length > 0) {
+        teamIDs = await getTeamMemberIdsByTeamName(selectedFilters.teams, projectId);
+      }
+
+      // 4) Construire la requête sur stop_events
       let stopsQuery = supabase
         .from('stop_events')
         .select(`*, machines (id, name)`)
@@ -221,17 +282,85 @@ const DowntimeReport: React.FC = () => {
         .gte('date', format(startDate, 'yyyy-MM-dd'))
         .lte('date', format(endDate, 'yyyy-MM-dd'));
 
-      if (machineIDs.length > 0) {
-        stopsQuery = stopsQuery.in('machine', machineIDs);
+      // 5) Appliquer machineIDs
+      if (finalMachineIDs.length > 0) {
+        stopsQuery = stopsQuery.in('machine', finalMachineIDs);
       }
+      // Appliquer productIDs
       if (productIDs.length > 0) {
         stopsQuery = stopsQuery.in('product', productIDs);
       }
+      // Appliquer teamIDs
+      if (teamIDs.length > 0) {
+        stopsQuery = stopsQuery.in('team_member', teamIDs);
+      }
 
-      const { data: stopsData, error: stopsError } = await stopsQuery;
-      if (stopsError) throw stopsError;
+      // On récupère également, si besoin, la table `lots` pour calculer le temps planifié, etc.
+      let lotsQuery = supabase
+        .from('lots')
+        .select(`
+          id,
+          start_time,
+          end_time,
+          machine,
+          product,
+          team_member,
+          lot_size,
+          ok_parts_produced,
+          products:product ( cycle_time )
+        `)
+        .eq('project_id', projectId)
+        .gte('start_time', startDate.toISOString())
+        .lte('start_time', endDate.toISOString());
 
-      // Initialisations
+      if (finalMachineIDs.length > 0) {
+        lotsQuery = lotsQuery.in('machine', finalMachineIDs);
+      }
+      if (productIDs.length > 0) {
+        lotsQuery = lotsQuery.in('product', productIDs);
+      }
+      if (teamIDs.length > 0) {
+        lotsQuery = lotsQuery.in('team_member', teamIDs);
+      }
+
+      // On récupère la table `quality_issues` pour rework/scrap
+      let qualityQuery = supabase
+        .from('quality_issues')
+        .select(`
+          id,
+          machine,
+          product,
+          team_member,
+          date,
+          category,
+          quantity
+        `)
+        .eq('project_id', projectId)
+        .gte('date', format(startDate, 'yyyy-MM-dd'))
+        .lte('date', format(endDate, 'yyyy-MM-dd'));
+
+      if (finalMachineIDs.length > 0) {
+        qualityQuery = qualityQuery.in('machine', finalMachineIDs);
+      }
+      if (productIDs.length > 0) {
+        qualityQuery = qualityQuery.in('product', productIDs);
+      }
+      if (teamIDs.length > 0) {
+        qualityQuery = qualityQuery.in('team_member', teamIDs);
+      }
+
+      // Exécuter
+      const [stopsRes, lotsRes, qualityRes] = await Promise.all([
+        stopsQuery,
+        lotsQuery,
+        qualityQuery
+      ]);
+
+      if (stopsRes.error) throw stopsRes.error;
+      if (lotsRes.error) throw lotsRes.error;
+      if (qualityRes.error) throw qualityRes.error;
+
+      // Traitement
       const machineMap = new Map<string, MachineDowntime>();
       const downtimeCategories = new Map<string, DowntimeData>([
         ['AP', { name: 'Planned Downtime', value: 0, color: '#2563eb' }],
@@ -248,10 +377,11 @@ const DowntimeReport: React.FC = () => {
       let totalStops = 0;
       let totalRepairTime = 0;
 
-      stopsData?.forEach((stop: any) => {
+      // Process stops
+      stopsRes.data?.forEach((stop: any) => {
         const machineId = stop.machine;
         const machineName = stop.machines?.name;
-        const failureType = stop.failure_type || 'CS'; // Par défaut
+        const failureType = stop.failure_type || 'CS';
         const startTime = new Date(stop.start_time);
         const endTime = stop.end_time ? new Date(stop.end_time) : new Date();
         const duration = differenceInMinutes(endTime, startTime);
@@ -268,10 +398,9 @@ const DowntimeReport: React.FC = () => {
 
         const cat = downtimeCategories.get(failureType);
         if (cat) {
-          cat.value += duration / 60; // en heures
+          cat.value += duration / 60;
         }
 
-        // Agrégation par machine
         if (machineId && machineName) {
           const mData = machineMap.get(machineId) || {
             id: machineId,
@@ -280,34 +409,45 @@ const DowntimeReport: React.FC = () => {
             stops: 0,
             mttr: 0,
             availability: 100,
-            trend: 0 // On le simulera ou le calculera
+            trend: 0
           };
           mData.downtime += duration;
           mData.stops++;
           machineMap.set(machineId, mData);
         }
 
-        // Échec
         const fData = failureMap.get(failureType) || { count: 0, duration: 0 };
         fData.count++;
         fData.duration += duration;
         failureMap.set(failureType, fData);
       });
 
-      // Calcul par machine
+      // Calculer la dispo machine plus tard, besoin du totalPeriod
+      const { data: lotsData } = lotsRes;
+      // On peut calculer du "plannedTime" etc. si besoin, pour la dispo
+
+      // Qualité (scrap/rework) => on peut l'ajouter si on veut
+      const { data: qData } = qualityRes;
+
+      // final
       machineMap.forEach(machine => {
+        const { startDate, endDate } = getDateRange();
         const totalPeriodMinutes = differenceInMinutes(endDate, startDate);
         machine.availability = ((totalPeriodMinutes - machine.downtime) / totalPeriodMinutes) * 100;
-
         machine.mttr = machine.stops > 0 ? machine.downtime / machine.stops : 0;
-
-        // On simule un "trend" : par exemple, on dit qu'on a +2% ou -3% aléatoire
-        // Adaptez selon votre logique
+        // On simule un trend
         machine.trend = Math.floor(Math.random() * 5) - 2; // ex: -2..+2
       });
 
-      // Breakdown par type
-      const breakdownData: FailureBreakdown[] = Array.from(failureMap.entries())
+      const totalPeriodMinutes = differenceInMinutes(endDate, startDate);
+      const availability = totalPeriodMinutes > 0
+        ? ((totalPeriodMinutes - totalDowntime) / totalPeriodMinutes) * 100
+        : 100;
+      const mttr = totalStops > 0 ? totalRepairTime / totalStops : 0;
+      const mtbf = totalStops > 0 ? (totalPeriodMinutes - totalDowntime) / totalStops : totalPeriodMinutes;
+
+      // Breakdown
+      const failureBreakdownData: FailureBreakdown[] = Array.from(failureMap.entries())
         .map(([type, data]) => ({
           type,
           count: data.count,
@@ -315,16 +455,6 @@ const DowntimeReport: React.FC = () => {
           percentage: totalDowntime > 0 ? (data.duration / totalDowntime) * 100 : 0
         }))
         .sort((a, b) => b.duration - a.duration);
-
-      // Calcul final
-      const totalPeriodMinutes = differenceInMinutes(endDate, startDate);
-      const availability = totalPeriodMinutes > 0
-        ? ((totalPeriodMinutes - totalDowntime) / totalPeriodMinutes) * 100
-        : 100;
-      const mttr = totalStops > 0 ? totalRepairTime / totalStops : 0;
-      const mtbf = totalStops > 0
-        ? (totalPeriodMinutes - totalDowntime) / totalStops
-        : totalPeriodMinutes;
 
       setMetrics({
         totalDowntime,
@@ -335,11 +465,8 @@ const DowntimeReport: React.FC = () => {
         availability
       });
       setDowntimeData(Array.from(downtimeCategories.values()));
-      setMachineDowntime(
-        Array.from(machineMap.values())
-          .sort((a, b) => b.downtime - a.downtime)
-      );
-      setFailureBreakdown(breakdownData);
+      setMachineDowntime(Array.from(machineMap.values()).sort((a, b) => b.downtime - a.downtime));
+      setFailureBreakdown(failureBreakdownData);
       setLoading(false);
     } catch (err) {
       console.error('Error loading downtime data:', err);
@@ -380,33 +507,23 @@ const DowntimeReport: React.FC = () => {
   };
 
   const handleClearFilters = () => {
-    setSelectedFilters({ machines: [], products: [] });
+    setSelectedFilters({ machines: [], lines: [], products: [], teams: [] });
   };
 
-  // On évite l'erreur "length is undefined" en vérifiant l'existence
   const isFilterActive =
-    (selectedFilters.machines && selectedFilters.machines.length > 0) ||
-    (selectedFilters.products && selectedFilters.products.length > 0);
+    selectedFilters.machines.length > 0 ||
+    selectedFilters.lines.length > 0 ||
+    selectedFilters.products.length > 0 ||
+    selectedFilters.teams.length > 0;
 
   // --------------------------------------------------------------------------
-  // 6) Recherche locale (searchTerm)
+  // 6) Formatage
   // --------------------------------------------------------------------------
-  const filteredMachineDowntime = machineDowntime.filter(m =>
-    m.name.toLowerCase().includes(searchTerm.toLowerCase())
-  );
-
-  // --------------------------------------------------------------------------
-  // 7) Formatage
-  // --------------------------------------------------------------------------
-  const formatDuration = (minutes: number, decimals = 0): string => {
+  const formatDuration = (minutes: number): string => {
     if (minutes <= 0) return '0h 0m';
     const h = Math.floor(minutes / 60);
-    const m = Math.floor(minutes % 60);
-    return `${h}h ${m.toFixed(decimals)}m`;
-  };
-
-  const formatNumber = (val: number, decimals = 1) => {
-    return val.toFixed(decimals);
+    const m = minutes % 60;
+    return `${h}h ${m}m`;
   };
 
   // --------------------------------------------------------------------------
@@ -416,28 +533,34 @@ const DowntimeReport: React.FC = () => {
     <ProjectLayout>
       <div className="py-8 px-4 sm:px-6 lg:px-8">
         {/* Header */}
-        <div className="flex flex-col md:flex-row md:items-center md:justify-between mb-6 space-y-4 md:space-y-0">
+        <div className="flex items-center justify-between mb-6">
           <div>
             <h2 className="text-2xl font-bold text-gray-900">Downtime Report</h2>
             <p className="mt-1 text-sm text-gray-500">
               Analyze equipment downtime and maintenance metrics
             </p>
           </div>
-          <div className="flex flex-col sm:flex-row sm:space-x-3 space-y-2 sm:space-y-0">
-            {/* Sélection de période */}
+          <div className="flex items-center space-x-3">
+            {/* Sélecteur de période */}
             <div className="relative">
               <button
                 onClick={() => setShowPeriodDropdown(!showPeriodDropdown)}
                 className="inline-flex items-center px-4 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
               >
                 <Calendar className="h-4 w-4 mr-2" />
-                {periodOptions.find((p) => p.value === selectedPeriod)?.label || 'Last 7 days'}
+                {selectedPeriod === '24h'
+                  ? 'Last 24 hours'
+                  : selectedPeriod === '7d'
+                  ? 'Last 7 days'
+                  : selectedPeriod === '30d'
+                  ? 'Last 30 days'
+                  : 'Last 90 days'}
                 <ChevronDown className="ml-2 h-4 w-4" />
               </button>
               {showPeriodDropdown && (
                 <div className="absolute right-0 mt-2 w-48 rounded-md shadow-lg bg-white ring-1 ring-black ring-opacity-5 z-10">
                   <div className="py-1">
-                    {periodOptions.map((p) => (
+                    {periodOptions.map(p => (
                       <button
                         key={p.value}
                         onClick={() => {
@@ -488,7 +611,6 @@ const DowntimeReport: React.FC = () => {
           onClearFilters={handleClearFilters}
         />
 
-        {/* Contenu principal */}
         {loading ? (
           <div className="flex justify-center items-center h-64">
             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
@@ -500,20 +622,6 @@ const DowntimeReport: React.FC = () => {
           </div>
         ) : (
           <div className="space-y-6">
-            {/* Barre de recherche (locale) pour machines */}
-            <div className="flex items-center space-x-2">
-              <div className="relative flex-1">
-                <Search className="absolute top-2 left-2 h-4 w-4 text-gray-400" />
-                <input
-                  type="text"
-                  placeholder="Search machine..."
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  className="pl-8 pr-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 w-full text-sm"
-                />
-              </div>
-            </div>
-
             {/* KPI Cards */}
             <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-4">
               {/* Total Downtime */}
@@ -536,7 +644,7 @@ const DowntimeReport: React.FC = () => {
                     <dt className="text-sm font-medium text-gray-500 truncate">Availability</dt>
                     <dd className="flex items-baseline">
                       <div className="text-2xl font-semibold text-gray-900">
-                        {formatNumber(metrics.availability, 1)}%
+                        {metrics.availability.toFixed(1)}%
                       </div>
                       <div className="ml-2 text-sm font-semibold text-green-600">↑ 2.3%</div>
                     </dd>
@@ -551,7 +659,7 @@ const DowntimeReport: React.FC = () => {
                     <dt className="text-sm font-medium text-gray-500 truncate">MTTR</dt>
                     <dd className="flex items-baseline">
                       <div className="text-2xl font-semibold text-gray-900">
-                        {formatDuration(metrics.mttr, 0)}
+                        {formatDuration(metrics.mttr)}
                       </div>
                       <div className="ml-2 text-sm font-semibold text-red-600">↑ 12m</div>
                     </dd>
@@ -566,7 +674,7 @@ const DowntimeReport: React.FC = () => {
                     <dt className="text-sm font-medium text-gray-500 truncate">MTBF</dt>
                     <dd className="flex items-baseline">
                       <div className="text-2xl font-semibold text-gray-900">
-                        {formatDuration(metrics.mtbf, 0)}
+                        {formatDuration(metrics.mtbf)}
                       </div>
                       <div className="ml-2 text-sm font-semibold text-green-600">↑ 1.5h</div>
                     </dd>
@@ -591,60 +699,53 @@ const DowntimeReport: React.FC = () => {
               </div>
             </div>
 
-            {/* Machine Downtime (filtrée localement par searchTerm) */}
+            {/* Machine Downtime */}
             <div className="bg-white shadow rounded-lg overflow-hidden">
               <div className="px-4 py-5 sm:px-6 border-b border-gray-200">
                 <h3 className="text-lg font-medium text-gray-900">Machine Downtime</h3>
               </div>
               <div className="px-4 py-5 sm:p-6">
-                {filteredMachineDowntime.length === 0 ? (
-                  <p className="text-sm text-gray-500">No machines match your search.</p>
-                ) : (
-                  <div className="space-y-4">
-                    {filteredMachineDowntime.map((machine) => (
-                      <div key={machine.id} className="bg-gray-50 rounded-lg p-4">
-                        <div className="sm:flex sm:items-center sm:justify-between">
-                          <div>
-                            <h4 className="text-sm font-medium text-gray-900">
-                              {machine.name}
-                            </h4>
-                            <div className="mt-1 flex items-center space-x-6 text-sm text-gray-500">
-                              <span>{machine.stops} stops</span>
-                              <span>{formatDuration(machine.downtime)} total</span>
-                              <span>{formatDuration(machine.mttr)} MTTR</span>
-                              <span className="font-medium text-blue-600">
-                                {formatNumber(machine.availability, 1)}% availability
-                              </span>
-                            </div>
-                          </div>
-                          <div className="mt-2 sm:mt-0">
-                            <div className="flex items-baseline">
-                              <span
-                                className={`text-sm font-medium ${
-                                  machine.trend > 0 ? 'text-green-600' : 'text-red-600'
-                                }`}
-                              >
-                                {machine.trend > 0 ? '↑' : '↓'} {Math.abs(machine.trend)}%
-                              </span>
-                            </div>
+                <div className="space-y-4">
+                  {machineDowntime.map(machine => (
+                    <div key={machine.id} className="bg-gray-50 rounded-lg p-4">
+                      <div className="sm:flex sm:items-center sm:justify-between">
+                        <div>
+                          <h4 className="text-sm font-medium text-gray-900">{machine.name}</h4>
+                          <div className="mt-1 flex items-center space-x-6 text-sm text-gray-500">
+                            <span>{machine.stops} stops</span>
+                            <span>{formatDuration(machine.downtime)} total</span>
+                            <span>{formatDuration(machine.mttr)} MTTR</span>
+                            <span className="font-medium text-blue-600">
+                              {machine.availability.toFixed(1)}% availability
+                            </span>
                           </div>
                         </div>
-                        <div className="mt-4">
-                          <div className="relative pt-1">
-                            <div className="overflow-hidden h-2 text-xs flex rounded bg-gray-200">
-                              <div
-                                style={{ width: `${machine.availability}%` }}
-                                className="shadow-none flex flex-col text-center whitespace-nowrap text-white justify-center bg-blue-600"
-                              />
-                            </div>
+                        <div className="mt-2 sm:mt-0">
+                          <div className="flex items-baseline">
+                            <span className={`text-sm font-medium ${
+                              machine.trend > 0 ? 'text-green-600' : 'text-red-600'
+                            }`}>
+                              {machine.trend > 0 ? '↑' : '↓'} {Math.abs(machine.trend)}%
+                            </span>
                           </div>
                         </div>
                       </div>
-                    ))}
-                  </div>
-                )}
+                      <div className="mt-4">
+                        <div className="relative pt-1">
+                          <div className="overflow-hidden h-2 text-xs flex rounded bg-gray-200">
+                            <div
+                              style={{ width: `${machine.availability}%` }}
+                              className="shadow-none flex flex-col text-center whitespace-nowrap text-white justify-center bg-blue-600"
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
               </div>
             </div>
+
           </div>
         )}
       </div>

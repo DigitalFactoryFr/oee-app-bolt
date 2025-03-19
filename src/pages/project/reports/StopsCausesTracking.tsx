@@ -48,6 +48,7 @@ import {
   ResponsiveContainer
 } from 'recharts';
 
+// --------------------- Types & Interfaces ---------------------
 type PeriodType = 'today' | 'yesterday' | 'week' | 'month' | 'quarter';
 
 // Un arrêt
@@ -106,6 +107,7 @@ const FAILURE_TYPES = [
   { type: 'CS', name: 'Series Change', icon: RefreshCw, color: '#16a34a' }
 ];
 
+// --------------------- Composant principal ---------------------
 const StopsCausesTracking: React.FC = () => {
   const { projectId } = useParams<{ projectId: string }>();
 
@@ -146,6 +148,9 @@ const StopsCausesTracking: React.FC = () => {
   // Recherche sur le nom de la cause
   const [searchTerm, setSearchTerm] = useState('');
 
+  // Pagination locale sur les causes
+  const [visibleCount, setVisibleCount] = useState(10); // On affiche 10 causes au départ
+
   // Données de comparaison
   const [comparisonData, setComparisonData] = useState<CauseData[]>([]);
 
@@ -159,6 +164,7 @@ const StopsCausesTracking: React.FC = () => {
       loadFilterOptions();
       loadData();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, selectedPeriod, selectedFilters]);
 
   // ------------------ Fonctions : Plage de dates ------------------
@@ -180,8 +186,10 @@ const StopsCausesTracking: React.FC = () => {
   }
 
   // ------------------ Filtres : handleFilterChange & clear ------------------
-  const handleFilterChange = (category: string, values: string[]) => {
+  const handleFilterChange = (category: keyof FilterOptions, values: string[]) => {
     setSelectedFilters(prev => ({ ...prev, [category]: values }));
+    // Reset la pagination quand on change les filtres
+    setVisibleCount(10);
   };
 
   const handleClearFilters = () => {
@@ -191,6 +199,7 @@ const StopsCausesTracking: React.FC = () => {
       products: [],
       teams: []
     });
+    setVisibleCount(10);
   };
 
   // ------------------ Comparaison ------------------
@@ -217,7 +226,6 @@ const StopsCausesTracking: React.FC = () => {
   // ------------------ Helpers : récupérer IDs ------------------
   async function getMachineIdsByName(names: string[]): Promise<string[]> {
     if (!names.length) return [];
-    // Vérifier si ce sont déjà des UUID
     const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
     if (names.every(n => uuidRegex.test(n))) {
       return names;
@@ -236,10 +244,6 @@ const StopsCausesTracking: React.FC = () => {
 
   async function getLineIdsByName(names: string[]): Promise<string[]> {
     if (!names.length) return [];
-    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-    if (names.every(n => uuidRegex.test(n))) {
-      return names;
-    }
     const { data, error } = await supabase
       .from('production_lines')
       .select('id, name')
@@ -314,12 +318,11 @@ const StopsCausesTracking: React.FC = () => {
 
       const { startDate, endDate } = getDateRange();
 
-      // 1) Si on filtre par lignes, récupérer toutes les machines associées
+      // 1) Récupérer machines depuis lines
       let finalMachineIDs: string[] = [];
       if (selectedFilters.lines.length > 0) {
         const lineIDs = await getLineIdsByName(selectedFilters.lines);
         if (lineIDs.length > 0) {
-          // Récupérer toutes les machines associées à ces lignes
           const { data: lineMachines, error } = await supabase
             .from('machines')
             .select('id, line_id')
@@ -333,14 +336,26 @@ const StopsCausesTracking: React.FC = () => {
           }
         }
       }
-      // 2) Si on filtre par machines, les ajouter
+      // 2) Ajouter machines filtrées
       if (selectedFilters.machines.length > 0) {
         const machineIDs = await getMachineIdsByName(selectedFilters.machines);
         finalMachineIDs = [...finalMachineIDs, ...machineIDs];
       }
-      finalMachineIDs = Array.from(new Set(finalMachineIDs)); // remove duplicates
+      finalMachineIDs = Array.from(new Set(finalMachineIDs));
 
-      // 3) Préparer la requête "stop_events"
+      // 3) Produits
+      let productIDs: string[] = [];
+      if (selectedFilters.products.length > 0) {
+        productIDs = await getProductIdsByName(selectedFilters.products);
+      }
+
+      // 4) Équipes
+      let teamIDs: string[] = [];
+      if (selectedFilters.teams.length > 0) {
+        teamIDs = await getTeamMemberIdsByTeamName(selectedFilters.teams);
+      }
+
+      // 5) Requête stop_events
       let query = supabase
         .from('stop_events')
         .select(`
@@ -358,21 +373,14 @@ const StopsCausesTracking: React.FC = () => {
         .gte('date', format(startDate, 'yyyy-MM-dd'))
         .lte('date', format(endDate, 'yyyy-MM-dd'));
 
-      // 4) Appliquer la liste finale de machines, plus produits & équipes
       if (finalMachineIDs.length > 0) {
         query = query.in('machine', finalMachineIDs);
       }
-      if (selectedFilters.products.length > 0) {
-        const productIDs = await getProductIdsByName(selectedFilters.products);
-        if (productIDs.length > 0) {
-          query = query.in('product', productIDs);
-        }
+      if (productIDs.length > 0) {
+        query = query.in('product', productIDs);
       }
-      if (selectedFilters.teams.length > 0) {
-        const teamIDs = await getTeamMemberIdsByTeamName(selectedFilters.teams);
-        if (teamIDs.length > 0) {
-          query = query.in('team_member', teamIDs);
-        }
+      if (teamIDs.length > 0) {
+        query = query.in('team_member', teamIDs);
       }
 
       const { data: stops, error: queryError } = await query;
@@ -399,8 +407,8 @@ const StopsCausesTracking: React.FC = () => {
 
       stops?.forEach((stop: any) => {
         const dateStr = stop.date;
-        const cause = stop.cause;
-        const type = stop.failure_type;
+        const cause = stop.cause || 'No Cause';
+        const type = stop.failure_type || 'CS';
         const duration = differenceInMinutes(
           stop.end_time ? new Date(stop.end_time) : new Date(),
           new Date(stop.start_time)
@@ -472,7 +480,7 @@ const StopsCausesTracking: React.FC = () => {
       const filteredCauses = causesArray.filter(c => c.totalDuration > 0)
         .sort((a, b) => b.totalDuration - a.totalDuration);
 
-      // Top 5
+      // Top 5 pour le graph
       const top5 = filteredCauses.slice(0, 5).map(c => c.cause);
       const causeTrendsArray: CauseTrend[] = dateRange.map(d => {
         const dateStr = format(d, 'yyyy-MM-dd');
@@ -525,7 +533,7 @@ const StopsCausesTracking: React.FC = () => {
   }
 
   // ------------------ Formatage & Recherche ------------------
-  const formatDuration = (minutes: number): string => {
+  const formatDurationFn = (minutes: number): string => {
     const hours = Math.floor(minutes / 60);
     const mins = minutes % 60;
     return `${hours}h ${mins}m`;
@@ -534,6 +542,14 @@ const StopsCausesTracking: React.FC = () => {
   const filteredCauses = causesData.filter(c =>
     c.cause.toLowerCase().includes(searchTerm.toLowerCase())
   );
+
+  // On limite l'affichage à `visibleCount` lignes
+  const displayedCauses = filteredCauses.slice(0, visibleCount);
+
+  // Gestion du bouton “View More”
+  const handleViewMore = () => {
+    setVisibleCount(prev => prev + 10);
+  };
 
   // ------------------ Rendu ------------------
   return (
@@ -669,7 +685,7 @@ const StopsCausesTracking: React.FC = () => {
                 <h3 className="text-lg font-medium text-gray-900">Stops Key Metrics</h3>
                 <div className="flex items-baseline space-x-2">
                   <span className="text-3xl font-bold text-blue-600">
-                    {formatDuration(totalDowntime)}
+                    {formatDurationFn(totalDowntime)}
                   </span>
                   <span className="text-sm text-red-600">Total Downtime</span>
                 </div>
@@ -718,7 +734,7 @@ const StopsCausesTracking: React.FC = () => {
                         <div>
                           <div className="text-sm font-medium text-gray-900">{ft.name}</div>
                           <div className="text-xs text-gray-600">
-                            {catCount} stops • {formatDuration(catDuration)}
+                            {catCount} stops • {formatDurationFn(catDuration)}
                           </div>
                         </div>
                       </div>
@@ -742,7 +758,7 @@ const StopsCausesTracking: React.FC = () => {
                     <YAxis />
                     <Tooltip
                       labelFormatter={(date) => format(parseISO(date as string), 'MMM dd, yyyy')}
-                      formatter={(value: any) => formatDuration(value)}
+                      formatter={(value: any) => formatDurationFn(value)}
                     />
                     <Legend />
                     {FAILURE_TYPES.map(type => (
@@ -771,7 +787,10 @@ const StopsCausesTracking: React.FC = () => {
                     <input
                       type="text"
                       value={searchTerm}
-                      onChange={(e) => setSearchTerm(e.target.value)}
+                      onChange={(e) => {
+                        setSearchTerm(e.target.value);
+                        setVisibleCount(10); // on reset la pagination si on tape dans la barre
+                      }}
                       placeholder="Search causes..."
                       className="block w-full pl-10 pr-3 py-2 border border-gray-300 rounded-md leading-5 bg-white placeholder-gray-500 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
                     />
@@ -780,14 +799,13 @@ const StopsCausesTracking: React.FC = () => {
               </div>
               <div className="px-4 py-5 sm:p-6">
                 <div className="space-y-4">
-                  {filteredCauses.map((cause, index) => (
+                  {displayedCauses.map((cause, index) => (
                     <div key={index} className="bg-gray-50 rounded-lg p-4">
                       <div className="sm:flex sm:items-center sm:justify-between">
                         <div>
                           <h4 className="text-sm font-medium text-gray-900">{cause.cause}</h4>
                           <div className="mt-1 grid grid-cols-1 sm:grid-cols-5 gap-4 text-sm">
                             {FAILURE_TYPES
-                              // On ne montre que si la durée > 0
                               .filter(ft => (cause.durations[ft.type] || 0) > 0)
                               .map(ft => {
                                 const dur = cause.durations[ft.type] || 0;
@@ -803,7 +821,7 @@ const StopsCausesTracking: React.FC = () => {
                                       />
                                     </div>
                                     <span className="text-gray-600">
-                                      {formatDuration(dur)}
+                                      {formatDurationFn(dur)}
                                     </span>
                                   </div>
                                 );
@@ -855,9 +873,22 @@ const StopsCausesTracking: React.FC = () => {
                       </div>
                     </div>
                   ))}
-                  {filteredCauses.length === 0 && (
+
+                  {displayedCauses.length === 0 && (
                     <div className="text-sm text-gray-500">
                       No matching causes for your search
+                    </div>
+                  )}
+
+                  {/* Bouton “View More” si on a plus de causes à afficher */}
+                  {filteredCauses.length > visibleCount && (
+                    <div className="text-center mt-4">
+                      <button
+                        onClick={handleViewMore}
+                        className="inline-flex items-center px-4 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
+                      >
+                        View More
+                      </button>
                     </div>
                   )}
                 </div>
@@ -878,15 +909,14 @@ const StopsCausesTracking: React.FC = () => {
                     <YAxis />
                     <Tooltip
                       labelFormatter={(date) => format(parseISO(date as string), 'MMM dd, yyyy')}
-                      formatter={(value: any) => formatDuration(value)}
+                      formatter={(value: any) => formatDurationFn(value)}
                     />
                     <Legend />
+                    {/* On affiche les 5 premières causes seulement */}
                     {causesData.slice(0, 5).map((cause, idx) => {
                       // Couleur via index ou fallback
                       const fallbackColors = ['#2563eb', '#dc2626', '#eab308', '#9333ea', '#16a34a'];
-                      const color = FAILURE_TYPES[idx]
-                        ? FAILURE_TYPES[idx].color
-                        : fallbackColors[idx] || '#999999';
+                      const color = fallbackColors[idx] || '#999999';
                       return (
                         <Line
                           key={cause.cause}
