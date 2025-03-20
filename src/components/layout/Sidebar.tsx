@@ -138,31 +138,23 @@ const Sidebar: React.FC = () => {
           Real-time Monitoring
         </NavLink>
         <NavLink
-          to={currentProject ? `/projects/${currentProject.id}/reports/predictive` : '#'}
-          className={
-            `group flex items-center px-3 py-2 text-sm font-medium rounded-md ${
-              !currentProject ? 'opacity-50 cursor-not-allowed' :
-              isPredictiveInsights ? 'bg-blue-50 text-blue-700' :
-              'text-gray-700 hover:bg-gray-50'
-            }`
-          }
-        >
-          <Brain className="mr-3 h-5 w-5" />
-          Predictive Insights
-        </NavLink>
-        <NavLink
-          to={currentProject ? `/projects/${currentProject.id}/ai-agents` : '#'}
-          className={
-            `group flex items-center px-3 py-2 text-sm font-medium rounded-md ${
-              !currentProject ? 'opacity-50 cursor-not-allowed' :
-              isAIAgents ? 'bg-blue-50 text-blue-700' :
-              'text-gray-700 hover:bg-gray-50'
-            }`
-          }
-        >
-          <Bot className="mr-3 h-5 w-5" />
-          AI Agents
-        </NavLink>
+  to="#"
+  onClick={(e) => e.preventDefault()}
+  className="group flex items-center px-3 py-2 text-sm font-medium rounded-md opacity-100 cursor-not-allowed text-gray-400"
+>
+  <Brain className="mr-3 h-5 w-5" />
+  Predictive Insights
+</NavLink>
+
+<NavLink
+  to="#"
+  onClick={(e) => e.preventDefault()}
+  className="group flex items-center px-3 py-2 text-sm font-medium rounded-md opacity-100 cursor-not-allowed text-gray-400"
+>
+  <Bot className="mr-3 h-5 w-5" />
+  AI Agents
+</NavLink>
+
       </div>
 
       {currentProject && (
