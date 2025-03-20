@@ -23,6 +23,21 @@ interface MachineState {
   bulkUpdateMachines: (updates: Array<{ id: string } & Partial<Machine>>) => Promise<void>;
 }
 
+
+export function MachinesPage() {
+  useEffect(() => {
+    async function logSession() {
+      const { data: { session } } = await supabase.auth.getSession();
+      console.log('JWT =', session?.access_token);
+    }
+    logSession();
+  }, []);
+
+  // ... le reste de votre composant
+}
+
+
+
 export const useMachineStore = create<MachineState>((set, get) => ({
   machines: [],
   loading: false,
@@ -252,3 +267,7 @@ async bulkCreateMachines(projectId, machines) {
 
 
 }));
+
+supabase.auth.getSession().then(({ data: { session } }) => {
+  console.log('JWT =', session?.access_token);
+});

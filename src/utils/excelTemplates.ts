@@ -3,8 +3,8 @@ import * as XLSX from 'xlsx';
 export const generateSampleDataTemplates = () => {
   // Common data to ensure consistency - updated to match actual data
   const operators = [
-    'operator1@example.com',
-    'operator2@example.com'
+    'operator1@i40pilot.app',
+    'operator2@i40pilot.app'
   ];
 
   const machines = [
@@ -276,8 +276,8 @@ export const generateSampleDataTemplates = () => {
     [''],
     ['Team Members:'],
     ['Email', 'Machine', 'Team', 'Shift'],
-    ['operator1@example.com', 'Machine 1', 'Team A', '06:00-14:00'],
-    ['operator2@example.com', 'Machine 2', 'Team B', '14:00-22:00'],
+    ['operator1@i40pilot.app', 'Machine 1', 'Team A', '06:00-14:00'],
+    ['operator2@i40pilot.app', 'Machine 2', 'Team B', '14:00-22:00'],
     [''],
     ['Quality Categories:'],
     ['Category', 'Description'],

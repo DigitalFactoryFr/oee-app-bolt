@@ -11,43 +11,66 @@ export default function AuthCallback() {
 
   useEffect(() => {
     const checkUserSession = async () => {
-      console.log("[AuthCallback] 🔄 Vérification de la session...");
+      console.log("[AuthCallback] 🔄 Début de la vérification de la session...");
 
       try {
-        // Vérification initiale de l'utilisateur
+        // Étape 1 : Vérifier si l'utilisateur est bien connecté
         const { data: { user }, error } = await supabase.auth.getUser();
-        
-        if (error) {
-          console.error("[AuthCallback] ❌ Erreur lors de la récupération de l'utilisateur :", error.message);
+        if (error || !user) {
+          console.error("[AuthCallback] ❌ Erreur ou utilisateur non trouvé :", error?.message);
           return navigate('/auth', { replace: true });
         }
 
-        console.log("[AuthCallback] ✅ Utilisateur récupéré :", user);
+        console.log("[AuthCallback] ✅ Utilisateur connecté :", user.email);
+        setUser(user);
 
-        if (!user) {
-          console.warn("[AuthCallback] ❌ Aucun utilisateur trouvé, tentative de rafraîchir la session...");
-          
-          // Forcer une récupération de session
-          const { data: refreshedSession, error: refreshError } = await supabase.auth.refreshSession();
-          
-          if (refreshError) {
-            console.error("[AuthCallback] ⚠️ Échec du rafraîchissement de la session :", refreshError.message);
-            return navigate('/auth', { replace: true });
-          }
+        // Étape 2 : Vérifier si l'utilisateur appartient à un projet
+        console.log("[AuthCallback] 🔍 Recherche de l'utilisateur dans team_members...");
+        const { data: member, error: memberError } = await supabase
+          .from('team_members')
+          .select('*')
+          .eq('email', user.email)
+          .maybeSingle();
 
-          console.log("[AuthCallback] 🔄 Session rafraîchie, récupération de l'utilisateur...");
-          user = refreshedSession?.user;
+        if (memberError || !member) {
+          console.warn("[AuthCallback] ❌ Aucun projet trouvé pour cet utilisateur.");
+          return navigate('/projects/new', { replace: true });
         }
 
-        if (user) {
-          console.log("[AuthCallback] ✅ Session active, redirection vers le tableau de bord...");
-          setUser(user);
-          fetchProjects(); // Charger les projets associés
-          return navigate('/dashboard', { replace: true });
-        } else {
-          console.warn("[AuthCallback] ❌ Aucun utilisateur détecté après rafraîchissement.");
-          return navigate('/auth', { replace: true });
+        console.log(`[AuthCallback] 📌 Utilisateur trouvé avec statut : ${member.status}`);
+
+        // Étape 3 : Vérifier si l'utilisateur doit être activé
+if (member.status === "invited") {
+  console.log("[AuthCallback] 🔄 Mise à jour du statut en 'active'...");
+
+  const { error: updateError } = await supabase
+    .from('team_members')
+    .update({ status: 'active' })
+    .eq('id', member.id);
+
+  if (updateError) {
+    console.error("[AuthCallback] ❌ Échec de la mise à jour du statut :", updateError.message);
+  } else {
+    console.log("[AuthCallback] ✅ Statut mis à jour en 'active'.");
+  }
+}
+
+
+        // Étape 4 : Vérifier l'accès au projet
+        console.log("[AuthCallback] 🔄 Vérification de l'accès au projet...");
+        const { data: project, error: projectError } = await supabase
+          .from('projects')
+          .select('*')
+          .eq('id', member.project_id)
+          .maybeSingle();
+
+        if (projectError || !project) {
+          console.warn("[AuthCallback] ❌ Impossible de récupérer le projet.");
+          return navigate('/projects/new', { replace: true });
         }
+
+        console.log(`[AuthCallback] 🚀 Redirection vers le projet : /projects/${member.project_id}`);
+        navigate(`/projects/${member.project_id}`, { replace: true });
 
       } catch (err) {
         console.error("[AuthCallback] ⚠️ Erreur inattendue :", err);
@@ -55,11 +78,7 @@ export default function AuthCallback() {
       }
     };
 
-    // Exécuter la vérification après un court délai pour s'assurer que Supabase a bien traité l'authentification
-    setTimeout(() => {
-      checkUserSession();
-    }, 2000);
-
+    checkUserSession();
   }, [navigate, setUser, fetchProjects]);
 
   return (

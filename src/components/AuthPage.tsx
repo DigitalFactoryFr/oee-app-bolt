@@ -28,22 +28,21 @@ const AuthPage: React.FC = () => {
     setError('');
   }, [mode]);
   
-  useEffect(() => {
-    if (user) {
-      // If returnTo is set, navigate there
-      if (returnTo) {
-        navigate(returnTo);
-      }
-      // Otherwise, if no projects, go to new project page
-      else if (projects.length === 0) {
-        navigate('/projects/new', { replace: true });
-      }
-      // Otherwise go to dashboard
-      else {
-        navigate('/dashboard', { replace: true });
-      }
+useEffect(() => {
+  if (user) {
+    if (returnTo) {
+      navigate(returnTo);
+    } else if (projects.length === 0) {
+      console.log("[Auth] 🚀 Aucun projet trouvé, redirection vers la création d'un projet...");
+      navigate('/projects/new', { replace: true });
+    } else {
+      // Rediriger vers le premier projet de la liste
+      console.log("[Auth] ✅ Projets trouvés, redirection vers le premier projet...");
+      navigate(`/projects/${projects[0].id}`, { replace: true });
     }
-  }, [user, projects, navigate, returnTo]);
+  }
+}, [user, projects, navigate, returnTo]);
+
   
   useEffect(() => {
     if (authError) {

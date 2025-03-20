@@ -20,34 +20,57 @@ const InvitePage = () => {
       }
 
       try {
-        // Get the team member record
+        // 🔍 Vérification de l'utilisateur
+        if (!user?.email) {
+          return navigate(`/auth?returnTo=/invite/${inviteId}`);
+        }
+
+        console.log("[InvitePage] 🔍 Vérification de l'invitation pour :", user.email);
+
+        // 📌 Étape 1 : Récupérer l'invitation associée à l'utilisateur
         const { data: teamMember, error: teamMemberError } = await supabase
           .from('team_members')
           .select('*')
           .eq('id', inviteId)
+          .eq('email', user.email) // Vérification que l'invitation correspond bien à l'email
           .single();
 
         if (teamMemberError) throw teamMemberError;
-        if (!teamMember) throw new Error('Invitation not found');
+        if (!teamMember) throw new Error('Invitation not found or not linked to your account');
 
-        // Check if invitation is still pending
+        // 📌 Étape 2 : Vérifier si l'invitation est encore valide
         if (teamMember.status !== 'pending' && teamMember.status !== 'invited') {
           throw new Error('This invitation has already been used or is no longer valid');
         }
 
-        // Update team member status
+        console.log("[InvitePage] 🔄 Mise à jour du statut en 'active'...");
+
+        // ✅ Étape 3 : Mise à jour du statut du membre invité
         const { error: updateError } = await supabase
           .from('team_members')
           .update({
             status: 'active',
             joined_at: new Date().toISOString()
           })
-          .eq('id', inviteId);
+          .eq('id', inviteId)
+          .eq('email', user.email); // Sécurité supplémentaire
 
         if (updateError) throw updateError;
 
-        // Redirect to the project
-        navigate(`/projects/${teamMember.project_id}`);
+        // ✅ Étape 4 : Vérification que le statut est bien mis à jour
+        const { data: updatedMember, error: fetchError } = await supabase
+          .from('team_members')
+          .select('*')
+          .eq('id', inviteId)
+          .eq('email', user.email)
+          .single();
+
+        if (!fetchError && updatedMember.status === 'active') {
+          console.log("[InvitePage] ✅ Invitation acceptée, redirection...");
+          navigate(`/projects/${teamMember.project_id}`);
+        } else {
+          throw new Error('Failed to verify the status update');
+        }
       } catch (err) {
         console.error('Error accepting invitation:', err);
         setError(err instanceof Error ? err.message : 'Failed to accept invitation');
@@ -58,9 +81,6 @@ const InvitePage = () => {
 
     if (user) {
       acceptInvite();
-    } else {
-      // If not logged in, redirect to auth page with return URL
-      navigate(`/auth?returnTo=/invite/${inviteId}`);
     }
   }, [inviteId, user, navigate]);
 
