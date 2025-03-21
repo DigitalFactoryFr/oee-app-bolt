@@ -1,10 +1,23 @@
-import React, { useEffect } from "react";
+import React, { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
 import { ArrowRight, BarChart3, Gauge, Zap } from "lucide-react";
+import ProjectLayout from "../../../components/layout/ProjectLayout";
 
 const Hero = () => {
+  const [isDemoOpen, setIsDemoOpen] = useState(false);
+
+  // Ouvre la popup vidéo
+  const openDemo = () => {
+    setIsDemoOpen(true);
+  };
+
+  // Ferme la popup vidéo
+  const closeDemo = () => {
+    setIsDemoOpen(false);
+  };
+
   useEffect(() => {
-    // Vérifier si l'URL contient un hash (#features ou #pricing) => scroll
+    // Si un hash est présent dans l'URL (ex. #features), on scroll vers l'élément correspondant
     const hash = window.location.hash;
     if (hash) {
       const id = hash.substring(1);
@@ -19,9 +32,9 @@ const Hero = () => {
 
   return (
     <div className="bg-white">
-      {/* Hero Section */}
+      {/* Section Hero */}
       <div className="grid grid-cols-1 lg:grid-cols-2">
-        {/* Colonne gauche : texte + CTA */}
+        {/* Colonne gauche : texte et CTA */}
         <div className="relative flex flex-col justify-center px-6 py-16 sm:py-20 lg:py-24 bg-gray-900">
           <div className="max-w-xl mx-auto text-white">
             <h1 className="text-4xl sm:text-5xl lg:text-6xl font-extrabold leading-tight">
@@ -38,17 +51,18 @@ const Hero = () => {
               >
                 Start for free
               </Link>
-              <a
-                href="https://i40pilot.app/#pricing"
+              {/* Bouton Demo qui ouvre la popup vidéo */}
+              <button
+                onClick={openDemo}
                 className="inline-flex items-center justify-center px-6 py-3 text-lg font-medium rounded-md text-gray-900 bg-white hover:bg-gray-50 shadow"
               >
                 View demo
-              </a>
+              </button>
             </div>
           </div>
         </div>
 
-        {/* Colonne droite : image + overlay */}
+        {/* Colonne droite : image avec overlay */}
         <div className="relative h-96 lg:h-auto">
           <img
             className="absolute inset-0 w-full h-full object-cover"
@@ -59,7 +73,42 @@ const Hero = () => {
         </div>
       </div>
 
-      {/* Features Section */}
+      {/* Popup Modal pour la vidéo Demo */}
+      {isDemoOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          {/* Overlay semi-transparent */}
+          <div
+            className="absolute inset-0 bg-black opacity-50"
+            onClick={closeDemo}
+          ></div>
+          {/* Contenu de la popup */}
+          <div className="relative bg-white rounded-lg shadow-lg p-4 max-w-3xl w-full z-10">
+            <div className="flex justify-end">
+              <button
+                onClick={closeDemo}
+                className="text-gray-600 hover:text-gray-800"
+              >
+                Close
+              </button>
+            </div>
+            <div className="mt-2">
+              {/* L'iframe doit utiliser l'URL de prévisualisation de Google Drive */}
+              <div className="aspect-w-16 aspect-h-9">
+                <iframe
+                  title="Demo Video"
+                  src="https://drive.google.com/file/d/1-kEbZPFBPaG9fi8fbwwCeA-dF_dmbQoc/preview"
+                  frameBorder="0"
+                  allow="autoplay; encrypted-media"
+                  allowFullScreen
+                  className="w-full h-full"
+                ></iframe>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Section Features (optionnel) */}
       <div id="features" className="bg-white py-16 sm:py-24 lg:py-28">
         <div className="mx-auto max-w-7xl px-6 lg:px-8 text-center">
           <h2 className="text-base font-semibold uppercase tracking-wide text-blue-600">
