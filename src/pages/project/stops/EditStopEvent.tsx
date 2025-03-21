@@ -142,6 +142,59 @@ const EditStopEvent: React.FC = () => {
 
   const formatEmail = (email: string) => email.split('@')[0];
 
+// Function to directly delete the stop event
+const handleDelete = async () => {
+  if (!projectId || !stopId) return;
+
+  
+  try {
+    setLoading(true);
+    const { error } = await supabase
+      .from('stop_events')
+      .delete()
+      .eq('id', stopId);
+      
+    if (error) throw error;
+    
+    navigate(`/projects/${projectId}/stops`);
+  } catch (err) {
+    console.error('Error deleting stop event:', err);
+    setError(err instanceof Error ? err.message : 'Failed to delete the event');
+  } finally {
+    setLoading(false);
+  }
+};
+
+// 1. Add state for the modal
+const [showDeleteModal, setShowDeleteModal] = useState(false);
+
+// Function to confirm deletion using a modal
+const confirmDelete = async () => {
+  if (!projectId || !stopId) return;
+
+
+  try {
+    setLoading(true);
+    const { error } = await supabase
+      .from('stop_events')
+      .delete()
+      .eq('id', stopId);
+      
+    if (error) throw error;
+    
+    // Redirect to the stops list after deletion
+    navigate(`/projects/${projectId}/stops`);
+  } catch (err) {
+    console.error('Error deleting event:', err);
+    setError(err instanceof Error ? err.message : 'Failed to delete the event');
+  } finally {
+    setLoading(false);
+  }
+};
+
+
+
+
   if (!stop) {
     return (
       <ProjectLayout>
@@ -290,31 +343,89 @@ const EditStopEvent: React.FC = () => {
               )}
             </form>
 
-            <div className="px-4 py-3 bg-gray-50 text-right sm:px-6">
-              <div className="flex justify-end space-x-3">
-                <button
-                  type="button"
-                  onClick={() => navigate(`/projects/${projectId}/stops`)}
-                  className="inline-flex items-center px-4 py-2 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  onClick={handleSubmit(onSubmit)}
-                  disabled={loading}
-                  className="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50"
-                >
-                  <Clock className="h-4 w-4 mr-2" />
-                  Update Stop Event
-                </button>
-              </div>
-            </div>
+<div className="px-4 py-3 bg-gray-50 text-right sm:px-6">
+  <div className="flex justify-end space-x-3">
+    <button
+      type="button"
+      onClick={() => navigate(`/projects/${projectId}/stops`)}
+      className="inline-flex items-center px-4 py-2 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+    >
+      Cancel
+    </button>
+    <button
+      type="submit"
+      onClick={handleSubmit(onSubmit)}
+      disabled={loading}
+      className="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50"
+    >
+      <Clock className="h-4 w-4 mr-2" />
+      Update Stop Event
+    </button>
+<button
+  type="button"
+  onClick={() => setShowDeleteModal(true)}
+  disabled={loading}
+  className="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-red-600 hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 disabled:opacity-50"
+>
+  Delete Stop Event
+</button>
+
+  </div>
+</div>
+
           </div>
         </div>
       </div>
+    
+    
+    {showDeleteModal && (
+  <div className="fixed z-10 inset-0 overflow-y-auto">
+    <div className="flex items-end justify-center min-h-screen pt-4 px-4 pb-20 text-center sm:block sm:p-0">
+      <div className="fixed inset-0 transition-opacity" aria-hidden="true">
+        <div className="absolute inset-0 bg-gray-500 opacity-75"></div>
+      </div>
+      <span className="hidden sm:inline-block sm:align-middle sm:h-screen" aria-hidden="true">
+        &#8203;
+      </span>
+      <div className="inline-block align-bottom bg-white rounded-lg px-4 pt-5 pb-4 text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg sm:w-full sm:p-6">
+        <div className="mt-3 text-center sm:mt-5">
+          <h3 className="text-lg leading-6 font-medium text-gray-900">
+            Delete Stop Event
+          </h3>
+          <div className="mt-2">
+            <p className="text-sm text-gray-500">
+              Are you sure you want to delete this stop event? This action cannot be undone.
+            </p>
+          </div>
+        </div>
+        <div className="mt-5 sm:mt-6 sm:grid sm:grid-cols-2 sm:gap-3 sm:grid-flow-row-dense">
+          <button
+            type="button"
+            onClick={confirmDelete}
+            disabled={loading}
+            className="w-full inline-flex justify-center rounded-md border border-transparent shadow-sm px-4 py-2 bg-red-600 text-base font-medium text-white hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 sm:col-start-2 sm:text-sm"
+          >
+            Delete
+          </button>
+          <button
+            type="button"
+            onClick={() => setShowDeleteModal(false)}
+            disabled={loading}
+            className="mt-3 w-full inline-flex justify-center rounded-md border border-gray-300 shadow-sm px-4 py-2 bg-white text-base font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 sm:mt-0 sm:col-start-1 sm:text-sm"
+          >
+            Cancel
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+)}
+
+    
     </ProjectLayout>
   );
 };
+
+
 
 export default EditStopEvent;

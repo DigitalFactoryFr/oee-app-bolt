@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useForm } from 'react-hook-form';
-import { Check, Search, ChevronLeft, AlertOctagon } from 'lucide-react';
+import { Check, Search, ChevronLeft, AlertOctagon, Trash2 } from 'lucide-react';
 import ProjectLayout from '../../../components/layout/ProjectLayout';
 import { useDataStore } from '../../../store/dataStore';
 import QualityTypeSelect from '../../../components/data/QualityTypeSelect';
@@ -28,6 +28,9 @@ const EditQualityIssue: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const { getCommonCauses } = useDataStore();
+
+  // 1. Add state for the delete confirmation modal
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
 
   const {
     register,
@@ -77,11 +80,10 @@ const EditQualityIssue: React.FC = () => {
       setCauseSearch(data.cause);
       setValue('comment', data.comment);
 
-      // Set end time to current local time if not already set
+      // Set end time if it exists, otherwise use current local time
       if (data.end_time) {
         setValue('end_time', new Date(data.end_time).toISOString().slice(0, 16));
       } else {
-        // Format current local time for datetime-local input
         const now = new Date();
         const year = now.getFullYear();
         const month = String(now.getMonth() + 1).padStart(2, '0');
@@ -144,6 +146,31 @@ const EditQualityIssue: React.FC = () => {
   };
 
   const formatEmail = (email: string) => email.split('@')[0];
+
+  // 2. Create a function to confirm deletion using Supabase
+  const confirmDelete = async () => {
+    if (!projectId || !issueId) return;
+    
+    try {
+      setLoading(true);
+      // Delete the quality issue from the database
+      const { error } = await supabase
+        .from('quality_issues')
+        .delete()
+        .eq('id', issueId);
+
+      if (error) throw error;
+
+      // Redirect after deletion
+      navigate(`/projects/${projectId}/quality`);
+    } catch (err) {
+      console.error('Error deleting quality issue:', err);
+      setError(err instanceof Error ? err.message : 'Failed to delete quality issue');
+    } finally {
+      setLoading(false);
+      setShowDeleteModal(false);
+    }
+  };
 
   if (!issue) {
     return (
@@ -259,7 +286,9 @@ const EditQualityIssue: React.FC = () => {
                           <li
                             key={index}
                             className="px-4 py-2 hover:bg-gray-100 cursor-pointer text-sm"
-                            onClick={() => handleCauseSelect(cause)}
+                            onClick={() => {
+                              handleCauseSelect(cause);
+                            }}
                           >
                             {cause}
                           </li>
@@ -311,6 +340,7 @@ const EditQualityIssue: React.FC = () => {
               )}
             </form>
 
+            {/* Action Buttons */}
             <div className="px-4 py-3 bg-gray-50 text-right sm:px-6">
               <div className="flex justify-end space-x-3">
                 <button
@@ -329,11 +359,70 @@ const EditQualityIssue: React.FC = () => {
                   <AlertOctagon className="h-4 w-4 mr-2" />
                   Update Quality Issue
                 </button>
+
+                {/* 3. Add a button to open the delete modal */}
+                <button
+                  type="button"
+                  onClick={() => setShowDeleteModal(true)}
+                  disabled={loading}
+                  className="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-red-600 hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 disabled:opacity-50"
+                >
+                  <Trash2 className="h-4 w-4 mr-2" />
+                  Delete Quality Issue
+                </button>
               </div>
             </div>
           </div>
         </div>
       </div>
+
+      {/* 4. Display the confirmation modal */}
+      {showDeleteModal && (
+        <div className="fixed z-10 inset-0 overflow-y-auto">
+          <div className="flex items-end justify-center min-h-screen pt-4 px-4 pb-20 text-center sm:block sm:p-0">
+            {/* Overlay */}
+            <div className="fixed inset-0 transition-opacity" aria-hidden="true">
+              <div className="absolute inset-0 bg-gray-500 opacity-75"></div>
+            </div>
+
+            {/* Centering trick */}
+            <span className="hidden sm:inline-block sm:align-middle sm:h-screen" aria-hidden="true">
+              &#8203;
+            </span>
+
+            <div className="inline-block align-bottom bg-white rounded-lg px-4 pt-5 pb-4 text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg sm:w-full sm:p-6">
+              <div className="mt-3 text-center sm:mt-5">
+                <h3 className="text-lg leading-6 font-medium text-gray-900">
+                  Delete Quality Issue
+                </h3>
+                <div className="mt-2">
+                  <p className="text-sm text-gray-500">
+                    Are you sure you want to delete this quality issue? This action cannot be undone.
+                  </p>
+                </div>
+              </div>
+              <div className="mt-5 sm:mt-6 sm:grid sm:grid-cols-2 sm:gap-3 sm:grid-flow-row-dense">
+                <button
+                  type="button"
+                  onClick={confirmDelete}
+                  disabled={loading}
+                  className="w-full inline-flex justify-center rounded-md border border-transparent shadow-sm px-4 py-2 bg-red-600 text-base font-medium text-white hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 sm:col-start-2 sm:text-sm"
+                >
+                  Delete
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowDeleteModal(false)}
+                  disabled={loading}
+                  className="mt-3 w-full inline-flex justify-center rounded-md border border-gray-300 shadow-sm px-4 py-2 bg-white text-base font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 sm:mt-0 sm:col-start-1 sm:text-sm"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </ProjectLayout>
   );
 };
