@@ -42,7 +42,8 @@ const Hero = () => {
               <span className="block text-blue-400">industrial production</span>
             </h1>
             <p className="mt-4 text-lg sm:text-xl text-gray-300 max-w-lg">
-              Track your OEE performance in real-time, identify bottlenecks, and improve your operational efficiency with our complete industrial monitoring solution.
+              Track your OEE performance in real-time, identify bottlenecks, and improve your
+              operational efficiency with our complete industrial monitoring solution.
             </p>
             <div className="mt-8 flex flex-col sm:flex-row space-y-3 sm:space-y-0 sm:space-x-4">
               <Link
@@ -81,7 +82,7 @@ const Hero = () => {
             className="absolute inset-0 bg-black opacity-50"
             onClick={closeDemo}
           ></div>
-          {/* Contenu de la popup */}
+          {/* Contenu de la popup : on agrandit la taille max et on utilise un ratio 16:9 */}
           <div className="relative bg-white rounded-lg shadow-lg p-4 max-w-3xl w-full z-10">
             <div className="flex justify-end">
               <button
@@ -92,15 +93,21 @@ const Hero = () => {
               </button>
             </div>
             <div className="mt-2">
-              {/* L'iframe doit utiliser l'URL de prévisualisation de Google Drive */}
-              <div className="aspect-w-16 aspect-h-9">
+              {/* Conteneur responsif pour la vidéo (ratio 16:9) */}
+              <div style={{ position: "relative", paddingBottom: "56.25%", height: 0 }}>
                 <iframe
                   title="Demo Video"
                   src="https://drive.google.com/file/d/1-kEbZPFBPaG9fi8fbwwCeA-dF_dmbQoc/preview"
                   frameBorder="0"
                   allow="autoplay; encrypted-media"
                   allowFullScreen
-                  className="w-full h-full"
+                  style={{
+                    position: "absolute",
+                    top: 0,
+                    left: 0,
+                    width: "100%",
+                    height: "100%",
+                  }}
                 ></iframe>
               </div>
             </div>
@@ -152,7 +159,9 @@ const Hero = () => {
                     <h3 className="mt-8 text-lg font-medium text-gray-900 tracking-tight">
                       {feature.title}
                     </h3>
-                    <p className="mt-5 text-base text-gray-500">{feature.description}</p>
+                    <p className="mt-5 text-base text-gray-500">
+                      {feature.description}
+                    </p>
                   </div>
                 </div>
               </div>
