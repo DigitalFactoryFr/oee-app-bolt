@@ -100,10 +100,13 @@ const NewStopEvent: React.FC = () => {
     }
   };
 
-  const handleCauseSelect = (cause: string) => {
-    setValue('cause', cause);
-    setShowCausesList(false);
-  };
+const handleCauseSelect = (cause: string) => {
+  setCauseSearch(cause); // Met à jour l'affichage de l'input
+  setValue('cause', cause, { shouldValidate: true }); // Enregistre la cause sélectionnée et force la validation
+  setShowCausesList(false); // Ferme la liste déroulante
+};
+
+
 
   if (!activeLot) {
     return (
