@@ -1,6 +1,15 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Plus, Search, Filter, AlertOctagon, X, Calendar, CheckCircle, AlertCircle, User, ChevronRight } from 'lucide-react';
+import {
+  Plus,
+  Search,
+  Filter,
+  AlertOctagon,
+  X,
+  CheckCircle,
+  AlertCircle,
+  User
+} from 'lucide-react'; // vous pouvez ajuster l'import si besoin
 import ProjectLayout from '../../../components/layout/ProjectLayout';
 import { useDataStore } from '../../../store/dataStore';
 import { useAuthStore } from '../../../store/authStore';
@@ -14,6 +23,7 @@ interface FilterTag {
   type: 'date' | 'status' | 'category' | 'owner';
 }
 
+// Détermine la couleur de badge selon la catégorie
 const getCategoryColor = (category: string) => {
   switch (category) {
     case 'at_station_rework':
@@ -27,6 +37,7 @@ const getCategoryColor = (category: string) => {
   }
 };
 
+// Détermine le label à afficher
 const getCategoryLabel = (category: string) => {
   switch (category) {
     case 'at_station_rework':
@@ -55,6 +66,7 @@ const QualityIssuesPage: React.FC = () => {
     loadIssues();
   }, [projectId, activeTags]);
 
+  // Charge la liste des QualityIssues, triées par created_at desc
   const loadIssues = async () => {
     if (!projectId || !user?.email) return;
 
@@ -62,7 +74,7 @@ const QualityIssuesPage: React.FC = () => {
       setLoading(true);
       setError(null);
 
-      // First get the team member ID for the current user
+      // Récupère l'ID du team_member pour filtrer si besoin "My Issues"
       const { data: teamMember } = await supabase
         .from('team_members')
         .select('id')
@@ -78,9 +90,10 @@ const QualityIssuesPage: React.FC = () => {
           machines:machine (name),
           team_members:team_member (email)
         `)
-        .eq('project_id', projectId);
+        .eq('project_id', projectId)
+        .order('created_at', { ascending: false }); // <-- Tri par date de création (décroissant)
 
-      // Apply filters from active tags
+      // Applique les filtres
       activeTags.forEach(tag => {
         switch (tag.type) {
           case 'date':
@@ -111,8 +124,8 @@ const QualityIssuesPage: React.FC = () => {
       });
 
       const { data, error } = await query;
-
       if (error) throw error;
+
       setIssues(data as QualityIssue[]);
     } catch (err) {
       console.error('Error loading quality issues:', err);
@@ -122,6 +135,7 @@ const QualityIssuesPage: React.FC = () => {
     }
   };
 
+  // Filtrage textuel
   const filteredIssues = issues.filter(issue => {
     if (!searchTerm) return true;
     const searchLower = searchTerm.toLowerCase();
@@ -136,19 +150,21 @@ const QualityIssuesPage: React.FC = () => {
 
   const formatEmail = (email: string) => email.split('@')[0];
 
+  // Retire un tag de filtre
   const removeTag = (tagId: string) => {
     setActiveTags(tags => tags.filter(tag => tag.id !== tagId));
   };
 
+  // Ajoute (ou remplace) un tag
   const addTag = (tag: FilterTag) => {
     setActiveTags(tags => {
-      // Remove existing tag of same type
       const filtered = tags.filter(t => t.type !== tag.type);
       return [...filtered, tag];
     });
     setShowFilterMenu(false);
   };
 
+  // Options de filtres
   const getDateOptions = () => [
     { label: 'Today', value: new Date().toISOString().split('T')[0] },
     { label: 'Yesterday', value: new Date(Date.now() - 86400000).toISOString().split('T')[0] },
@@ -174,6 +190,7 @@ const QualityIssuesPage: React.FC = () => {
     { label: 'All Issues', value: 'all-issues' }
   ];
 
+  // Marque un QualityIssue comme "completed"
   const handleCompleteIssue = async (issueId: string) => {
     try {
       await supabase
@@ -193,6 +210,7 @@ const QualityIssuesPage: React.FC = () => {
   return (
     <ProjectLayout>
       <div className="py-6 px-4 sm:px-6 lg:px-8">
+        {/* Header */}
         <div className="flex items-center justify-between mb-6">
           <div>
             <h2 className="text-2xl font-bold text-gray-900">Quality Issues</h2>
@@ -211,6 +229,7 @@ const QualityIssuesPage: React.FC = () => {
 
         {/* Stats Overview */}
         <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-4 mb-6">
+          {/* Active Issues */}
           <div className="bg-white overflow-hidden shadow rounded-lg">
             <div className="p-5">
               <div className="flex items-center">
@@ -219,9 +238,7 @@ const QualityIssuesPage: React.FC = () => {
                 </div>
                 <div className="ml-5 w-0 flex-1">
                   <dl>
-                    <dt className="text-sm font-medium text-gray-500 truncate">
-                      Active Issues
-                    </dt>
+                    <dt className="text-sm font-medium text-gray-500 truncate">Active Issues</dt>
                     <dd className="text-lg font-semibold text-gray-900">
                       {filteredIssues.filter(i => i.status === 'ongoing').length}
                     </dd>
@@ -231,6 +248,7 @@ const QualityIssuesPage: React.FC = () => {
             </div>
           </div>
 
+          {/* Completed Today */}
           <div className="bg-white overflow-hidden shadow rounded-lg">
             <div className="p-5">
               <div className="flex items-center">
@@ -239,14 +257,13 @@ const QualityIssuesPage: React.FC = () => {
                 </div>
                 <div className="ml-5 w-0 flex-1">
                   <dl>
-                    <dt className="text-sm font-medium text-gray-500 truncate">
-                      Completed Today
-                    </dt>
+                    <dt className="text-sm font-medium text-gray-500 truncate">Completed Today</dt>
                     <dd className="text-lg font-semibold text-gray-900">
-                      {filteredIssues.filter(i => 
-                        i.status === 'completed' && 
-                        i.date === new Date().toISOString().split('T')[0]
-                      ).length}
+                      {
+                        filteredIssues.filter(
+                          i => i.status === 'completed' && i.date === new Date().toISOString().split('T')[0]
+                        ).length
+                      }
                     </dd>
                   </dl>
                 </div>
@@ -254,6 +271,7 @@ const QualityIssuesPage: React.FC = () => {
             </div>
           </div>
 
+          {/* Total Scrap Today */}
           <div className="bg-white overflow-hidden shadow rounded-lg">
             <div className="p-5">
               <div className="flex items-center">
@@ -262,14 +280,13 @@ const QualityIssuesPage: React.FC = () => {
                 </div>
                 <div className="ml-5 w-0 flex-1">
                   <dl>
-                    <dt className="text-sm font-medium text-gray-500 truncate">
-                      Total Scrap Today
-                    </dt>
+                    <dt className="text-sm font-medium text-gray-500 truncate">Total Scrap Today</dt>
                     <dd className="text-lg font-semibold text-gray-900">
                       {filteredIssues
-                        .filter(i => 
-                          i.category === 'scrap' && 
-                          i.date === new Date().toISOString().split('T')[0]
+                        .filter(
+                          i =>
+                            i.category === 'scrap' &&
+                            i.date === new Date().toISOString().split('T')[0]
                         )
                         .reduce((sum, i) => sum + i.quantity, 0)}
                     </dd>
@@ -279,6 +296,7 @@ const QualityIssuesPage: React.FC = () => {
             </div>
           </div>
 
+          {/* Total Rework Today */}
           <div className="bg-white overflow-hidden shadow rounded-lg">
             <div className="p-5">
               <div className="flex items-center">
@@ -287,14 +305,14 @@ const QualityIssuesPage: React.FC = () => {
                 </div>
                 <div className="ml-5 w-0 flex-1">
                   <dl>
-                    <dt className="text-sm font-medium text-gray-500 truncate">
-                      Total Rework Today
-                    </dt>
+                    <dt className="text-sm font-medium text-gray-500 truncate">Total Rework Today</dt>
                     <dd className="text-lg font-semibold text-gray-900">
                       {filteredIssues
-                        .filter(i => 
-                          (i.category === 'at_station_rework' || i.category === 'off_station_rework') && 
-                          i.date === new Date().toISOString().split('T')[0]
+                        .filter(
+                          i =>
+                            (i.category === 'at_station_rework' ||
+                              i.category === 'off_station_rework') &&
+                            i.date === new Date().toISOString().split('T')[0]
                         )
                         .reduce((sum, i) => sum + i.quantity, 0)}
                     </dd>
@@ -305,10 +323,12 @@ const QualityIssuesPage: React.FC = () => {
           </div>
         </div>
 
+        {/* Bloc principal */}
         <div className="bg-white shadow rounded-lg">
-          {/* Search and Filters */}
+          {/* Barre de recherche + Filtres */}
           <div className="p-4 border-b border-gray-200">
             <div className="flex items-center space-x-4">
+              {/* Recherche texte */}
               <div className="flex-1 relative">
                 <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
                   <Search className="h-5 w-5 text-gray-400" />
@@ -321,6 +341,7 @@ const QualityIssuesPage: React.FC = () => {
                   className="block w-full pl-10 pr-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
                 />
               </div>
+              {/* Bouton Filters */}
               <div className="relative">
                 <button
                   onClick={() => setShowFilterMenu(!showFilterMenu)}
@@ -332,41 +353,82 @@ const QualityIssuesPage: React.FC = () => {
                 {showFilterMenu && (
                   <div className="absolute right-0 mt-2 w-56 rounded-md shadow-lg bg-white ring-1 ring-black ring-opacity-5 z-10">
                     <div className="py-1" role="menu">
+                      {/* Owner */}
                       <div className="px-4 py-2 text-xs font-semibold text-gray-500">Owner</div>
                       {getOwnerOptions().map(option => (
                         <button
                           key={option.value}
-                          onClick={() => addTag({ id: `owner-${option.value}`, label: option.label, value: option.value, type: 'owner' })}
+                          onClick={() =>
+                            addTag({
+                              id: `owner-${option.value}`,
+                              label: option.label,
+                              value: option.value,
+                              type: 'owner'
+                            })
+                          }
                           className="block w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
                         >
                           {option.label}
                         </button>
                       ))}
-                      <div className="px-4 py-2 text-xs font-semibold text-gray-500 border-t">Date</div>
+
+                      {/* Date */}
+                      <div className="px-4 py-2 text-xs font-semibold text-gray-500 border-t">
+                        Date
+                      </div>
                       {getDateOptions().map(option => (
                         <button
                           key={option.value}
-                          onClick={() => addTag({ id: `date-${option.value}`, label: option.label, value: option.value, type: 'date' })}
+                          onClick={() =>
+                            addTag({
+                              id: `date-${option.value}`,
+                              label: option.label,
+                              value: option.value,
+                              type: 'date'
+                            })
+                          }
                           className="block w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
                         >
                           {option.label}
                         </button>
                       ))}
-                      <div className="px-4 py-2 text-xs font-semibold text-gray-500 border-t">Status</div>
+
+                      {/* Status */}
+                      <div className="px-4 py-2 text-xs font-semibold text-gray-500 border-t">
+                        Status
+                      </div>
                       {getStatusOptions().map(option => (
                         <button
                           key={option.value}
-                          onClick={() => addTag({ id: `status-${option.value}`, label: option.label, value: option.value, type: 'status' })}
+                          onClick={() =>
+                            addTag({
+                              id: `status-${option.value}`,
+                              label: option.label,
+                              value: option.value,
+                              type: 'status'
+                            })
+                          }
                           className="block w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
                         >
                           {option.label}
                         </button>
                       ))}
-                      <div className="px-4 py-2 text-xs font-semibold text-gray-500 border-t">Category</div>
+
+                      {/* Category */}
+                      <div className="px-4 py-2 text-xs font-semibold text-gray-500 border-t">
+                        Category
+                      </div>
                       {getCategoryOptions().map(option => (
                         <button
                           key={option.value}
-                          onClick={() => addTag({ id: `category-${option.value}`, label: option.label, value: option.value, type: 'category' })}
+                          onClick={() =>
+                            addTag({
+                              id: `category-${option.value}`,
+                              label: option.label,
+                              value: option.value,
+                              type: 'category'
+                            })
+                          }
                           className="block w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
                         >
                           {option.label}
@@ -378,7 +440,7 @@ const QualityIssuesPage: React.FC = () => {
               </div>
             </div>
 
-            {/* Active Filters */}
+            {/* Filtres actifs */}
             {activeTags.length > 0 && (
               <div className="mt-4 flex items-center space-x-2 overflow-x-auto pb-2">
                 {activeTags.map(tag => (
@@ -399,7 +461,7 @@ const QualityIssuesPage: React.FC = () => {
             )}
           </div>
 
-          {/* Issues List */}
+          {/* Liste des Quality Issues */}
           <div className="p-4">
             {loading ? (
               <div className="flex justify-center items-center h-32">
@@ -409,14 +471,18 @@ const QualityIssuesPage: React.FC = () => {
               <div className="bg-red-50 p-4 rounded-md">
                 <div className="flex">
                   <div className="ml-3">
-                    <h3 className="text-sm font-medium text-red-800">Error loading quality issues</h3>
+                    <h3 className="text-sm font-medium text-red-800">
+                      Error loading quality issues
+                    </h3>
                     <div className="mt-2 text-sm text-red-700">{error}</div>
                   </div>
                 </div>
               </div>
             ) : filteredIssues.length === 0 ? (
               <div className="text-center py-12">
-                <p className="text-sm text-gray-500">No quality issues found for the selected filters.</p>
+                <p className="text-sm text-gray-500">
+                  No quality issues found for the selected filters.
+                </p>
                 <div className="mt-4">
                   <button
                     onClick={() => navigate(`/projects/${projectId}/quality/select-lot`)}
@@ -429,7 +495,7 @@ const QualityIssuesPage: React.FC = () => {
               </div>
             ) : (
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                {filteredIssues.map((issue) => (
+                {filteredIssues.map(issue => (
                   <div
                     key={issue.id}
                     onClick={() => navigate(`/projects/${projectId}/quality/${issue.id}`)}
@@ -439,14 +505,18 @@ const QualityIssuesPage: React.FC = () => {
                       {/* Header */}
                       <div className="flex items-center justify-between mb-4">
                         <div className="flex items-center space-x-2">
-                          <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                            issue.status === 'completed' 
-                              ? 'bg-green-100 text-green-800'
-                              : 'bg-yellow-100 text-yellow-800'
-                          }`}>
+                          <span
+                            className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                              issue.status === 'completed'
+                                ? 'bg-green-100 text-green-800'
+                                : 'bg-yellow-100 text-yellow-800'
+                            }`}
+                          >
                             {issue.status === 'completed' ? 'Completed' : 'Ongoing'}
                           </span>
-                          <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getCategoryColor(issue.category)}`}>
+                          <span
+                            className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getCategoryColor(issue.category)}`}
+                          >
                             {getCategoryLabel(issue.category)}
                           </span>
                         </div>
@@ -465,15 +535,19 @@ const QualityIssuesPage: React.FC = () => {
                             {issue.machines.name}
                           </div>
                         </div>
-
                         <div>
                           <div className="text-sm text-gray-500">
                             {new Date(issue.date).toLocaleDateString()}
-                            {issue.start_time && ` • ${new Date(issue.start_time).toLocaleTimeString().slice(0, -3)}`}
-                            {issue.end_time && ` - ${new Date(issue.end_time).toLocaleTimeString().slice(0, -3)}`}
+                            {issue.start_time &&
+                              ` • ${new Date(issue.start_time)
+                                .toLocaleTimeString()
+                                .slice(0, -3)}`}
+                            {issue.end_time &&
+                              ` - ${new Date(issue.end_time)
+                                .toLocaleTimeString()
+                                .slice(0, -3)}`}
                           </div>
                         </div>
-
                         <div>
                           <div className="text-sm font-medium text-gray-900">
                             {issue.cause}
@@ -484,7 +558,6 @@ const QualityIssuesPage: React.FC = () => {
                             </div>
                           )}
                         </div>
-
                         <div className="flex items-center pt-2 border-t border-gray-100">
                           <User className="h-4 w-4 text-gray-400 mr-2" />
                           <span className="text-sm text-gray-600">

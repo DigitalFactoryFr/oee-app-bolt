@@ -17,7 +17,7 @@ interface LotStats {
 
 interface Lot {
   id: string;
-  lot_id?: string;
+  lot_id?: string;            // Affichage du lot_id
   date: string;
   start_time: string;
   end_time: string;
@@ -29,6 +29,7 @@ interface Lot {
   lot_size: number;
   stop_events: { id: string }[];
   quality_issues: { id: string }[];
+  created_at?: string;        // Assurez-vous que ce champ existe dans votre table
 }
 
 interface FilterTag {
@@ -68,41 +69,37 @@ const LotsPage: React.FC = () => {
     try {
       const today = new Date().toISOString().split('T')[0];
 
-      // Get lots stats
+      // Récupération des stats "in_progress" / "completed"
       const { data: lotsStats, error: lotsError } = await supabase
         .from('lots')
         .select('status', { count: 'exact' })
         .eq('project_id', projectId)
         .in('status', ['in_progress', 'completed']);
-
       if (lotsError) throw lotsError;
 
-      // Get today's stops count
+      // Récupération du nombre de stops créés aujourd'hui
       const { data: stopsData, error: stopsError } = await supabase
         .from('stop_events')
         .select('id')
         .eq('project_id', projectId)
         .eq('date', today);
-
       if (stopsError) throw stopsError;
 
-      // Get today's quality issues count
+      // Récupération du nombre de quality issues créés aujourd'hui
       const { data: qualityData, error: qualityError } = await supabase
         .from('quality_issues')
         .select('id')
         .eq('project_id', projectId)
         .eq('date', today);
-
       if (qualityError) throw qualityError;
 
-      // Get delayed lots count
+      // Récupération des lots "in_progress" mais en retard (end_time < maintenant)
       const { data: delayedData, error: delayedError } = await supabase
         .from('lots')
         .select('id')
         .eq('project_id', projectId)
         .eq('status', 'in_progress')
         .lt('end_time', new Date().toISOString());
-
       if (delayedError) throw delayedError;
 
       setStats({
@@ -140,11 +137,14 @@ const LotsPage: React.FC = () => {
           ok_parts_produced,
           lot_size,
           stop_events (id),
-          quality_issues (id)
+          quality_issues (id),
+          created_at
         `)
-        .eq('project_id', projectId);
+        .eq('project_id', projectId)
+        // Tri par date de création (plus récent en premier)
+        .order('created_at', { ascending: false });
 
-      // Apply filters from active tags
+      // Application des filtres (activeTags)
       activeTags.forEach(tag => {
         switch (tag.type) {
           case 'date':
@@ -165,8 +165,8 @@ const LotsPage: React.FC = () => {
       });
 
       const { data, error } = await query;
-
       if (error) throw error;
+
       setLots(data as Lot[]);
     } catch (err) {
       console.error('Error loading lots:', err);
@@ -176,6 +176,7 @@ const LotsPage: React.FC = () => {
     }
   };
 
+  // Filtrage par "searchTerm"
   const filteredLots = lots.filter(lot => {
     if (!searchTerm) return true;
     const searchLower = searchTerm.toLowerCase();
@@ -189,19 +190,21 @@ const LotsPage: React.FC = () => {
 
   const formatEmail = (email: string) => email.split('@')[0];
 
+  // Gestion des tags
   const removeTag = (tagId: string) => {
     setActiveTags(tags => tags.filter(tag => tag.id !== tagId));
   };
 
   const addTag = (tag: FilterTag) => {
     setActiveTags(tags => {
-      // Remove existing tag of same type
+      // On supprime l'ancien tag du même type
       const filtered = tags.filter(t => t.type !== tag.type);
       return [...filtered, tag];
     });
     setShowFilterMenu(false);
   };
 
+  // Options pour le filtrage
   const getDateOptions = () => [
     { label: 'Today', value: new Date().toISOString().split('T')[0] },
     { label: 'Yesterday', value: new Date(Date.now() - 86400000).toISOString().split('T')[0] },
@@ -446,6 +449,13 @@ const LotsPage: React.FC = () => {
                     className="block bg-white border rounded-lg shadow-sm hover:shadow-md transition-shadow duration-200"
                   >
                     <div className="p-4">
+                      {/* Affichage du lot_id si disponible */}
+                      {lot.lot_id && (
+                        <div className="text-xs font-semibold text-gray-800 bg-gray-100 px-2 py-1 rounded inline-block mb-2">
+                          Lot #{lot.lot_id}
+                        </div>
+                      )}
+
                       <div className="flex items-center justify-between mb-4">
                         <div>
                           <h3 className="text-lg font-medium text-gray-900">
@@ -454,7 +464,7 @@ const LotsPage: React.FC = () => {
                           <p className="text-sm text-gray-500">{lot.machines.name}</p>
                         </div>
                         <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                          lot.status === 'in_progress' 
+                          lot.status === 'in_progress'
                             ? 'bg-blue-100 text-blue-800'
                             : 'bg-green-100 text-green-800'
                         }`}>
@@ -485,7 +495,9 @@ const LotsPage: React.FC = () => {
                         <div className="relative pt-1">
                           <div className="overflow-hidden h-2 text-xs flex rounded bg-gray-100">
                             <div
-                              style={{ width: `${(lot.ok_parts_produced / lot.lot_size) * 100}%` }}
+                              style={{
+                                width: `${(lot.ok_parts_produced / lot.lot_size) * 100}%`
+                              }}
                               className="shadow-none flex flex-col text-center whitespace-nowrap text-white justify-center bg-blue-500"
                             />
                           </div>
