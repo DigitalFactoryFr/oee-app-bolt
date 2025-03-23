@@ -68,11 +68,6 @@ export const useProjectStore = create<ProjectState>((set) => ({
       set({ projects: data || [], loading: false });
       
       
-      if (data && data.length > 0) {
-        console.log("[ProjectStore] ✅ Sélection du premier projet :", data[0]);
-        set({ currentProject: data[0] });
-        localStorage.setItem('currentProject', JSON.stringify(data[0]));
-}
 
       
     } catch (error) {

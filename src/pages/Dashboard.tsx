@@ -80,9 +80,7 @@ useEffect(() => {
   loadProjects();
 }, [user, navigate]);
 
-
-
-  useEffect(() => {
+useEffect(() => {
     if (currentProject?.id) {
       const fetchData = async () => {
         await Promise.all([
