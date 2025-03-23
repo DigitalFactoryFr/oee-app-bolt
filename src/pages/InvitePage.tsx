@@ -28,12 +28,12 @@ const InvitePage = () => {
       try {
         console.log("[InvitePage] Vérification de l'invitation pour :", user.email);
 
-        // Récupérer l'invitation dans team_members et vérifier que l'email correspond
+        // Récupérer l'invitation dans team_members et vérifier que l'email correspond (en minuscules)
         const { data: teamMember, error: teamMemberError } = await supabase
           .from('team_members')
           .select('*')
           .eq('id', inviteId)
-          .eq('email', user.email)
+          .eq('email', user.email.toLowerCase())
           .single();
 
         if (teamMemberError) throw teamMemberError;
@@ -54,7 +54,7 @@ const InvitePage = () => {
             joined_at: new Date().toISOString()
           })
           .eq('id', inviteId)
-          .eq('email', user.email);
+          .eq('email', user.email.toLowerCase());
 
         if (updateError) throw updateError;
 
@@ -63,12 +63,12 @@ const InvitePage = () => {
           .from('team_members')
           .select('*')
           .eq('id', inviteId)
-          .eq('email', user.email)
+          .eq('email', user.email.toLowerCase())
           .single();
 
         if (!fetchError && updatedMember.status === 'active') {
           console.log("[InvitePage] Invitation acceptée, redirection...");
-          // Rediriger vers la page du projet (ou le dashboard si vous préférez)
+          // Rediriger vers la page du projet
           navigate(`/projects/${teamMember.project_id}`, { replace: true });
         } else {
           throw new Error('Failed to verify the status update');
