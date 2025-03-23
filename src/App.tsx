@@ -297,6 +297,30 @@ useEffect(() => {
         
         {/* Redirect to dashboard if logged in, otherwise to home */}
         <Route path="*" element={<Navigate to="/dashboard" replace />} />
+
+
+  <Routes>
+    {/* Autres routes */}
+
+    {/* Route pour /projects/:projectId/dashboard */}
+    <Route path="/projects/:projectId/dashboard" element={
+      <ProtectedRoute>
+        <Dashboard />
+      </ProtectedRoute>
+    } />
+
+    {/* Route existante pour /dashboard (global) */}
+    <Route path="/dashboard" element={
+      <ProtectedRoute>
+        <Dashboard />
+      </ProtectedRoute>
+    } />
+
+    {/* etc. */}
+  </Routes>
+
+
+        
       </Routes>
     </Router>
   );
