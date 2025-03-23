@@ -69,8 +69,10 @@ if (member.status === "invited") {
           return navigate('/projects/new', { replace: true });
         }
 
-        console.log(`[AuthCallback] 🚀 Redirection vers le projet : /projects/${member.project_id}`);
-        navigate(`/projects/${member.project_id}`, { replace: true });
+    console.log("[AuthCallback] 🚀 Redirection vers le dashboard");
+navigate('/dashboard', { replace: true });
+
+
 
       } catch (err) {
         console.error("[AuthCallback] ⚠️ Erreur inattendue :", err);

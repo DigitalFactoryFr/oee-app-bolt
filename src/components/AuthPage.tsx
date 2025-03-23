@@ -38,8 +38,8 @@ useEffect(() => {
       navigate('/projects/new', { replace: true });
     } else {
       // Rediriger vers le premier projet de la liste
-      console.log("[Auth] ✅ Projets trouvés, redirection vers le premier projet...");
-      navigate(`/projects/${projects[0].id}`, { replace: true });
+      console.log("[Auth] ✅ Projets trouvés, redirection...");
+      navigate('/dashboard', { replace: true });
     }
   }
 }, [user, projects, navigate, returnTo]);
