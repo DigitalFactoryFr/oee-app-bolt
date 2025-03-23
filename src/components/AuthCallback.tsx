@@ -71,7 +71,8 @@ if (member.status === "invited") {
         }
 
     console.log("[AuthCallback] 🚀 Redirection vers le dashboard");
-navigate('/dashboard', { replace: true });
+navigate(`/projects/${member.project_id}`, { replace: true });
+
 
 
 
