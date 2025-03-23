@@ -199,6 +199,7 @@ const handleCauseSelect = (cause: string) => {
                     value={causeSearch}
                     onChange={(e) => {
                       setCauseSearch(e.target.value);
+                      setValue('cause', e.target.value, { shouldValidate: true });
                       setShowCausesList(true);
                     }}
                     className="block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
