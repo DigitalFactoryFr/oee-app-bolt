@@ -1,6 +1,8 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { useAuthStore } from './store/authStore';
+import { useProjectStore } from './store/projectStore';
+
 
 // Pages
 import Header from './components/Header';
@@ -49,6 +51,8 @@ import AIAgents from './pages/project/AIAgents';
 import InvitePage from './pages/InvitePage';
 import CheckoutSuccessPage from './pages/CheckoutSuccessPage';
 import CheckoutCancelPage from './pages/CheckoutCancelPage';
+
+
 
 
 
@@ -299,7 +303,7 @@ useEffect(() => {
         <Route path="*" element={<Navigate to="/dashboard" replace />} />
 
 
-  <Routes>
+
     {/* Autres routes */}
 
     {/* Route pour /projects/:projectId/dashboard */}
@@ -316,8 +320,6 @@ useEffect(() => {
       </ProtectedRoute>
     } />
 
-    {/* etc. */}
-  </Routes>
 
 
         
