@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { supabase } from '../lib/supabase';
 import { sendEmail } from '../services/emailService';
 import type { TeamMember, ProjectRole } from '../types';
+import { useProjectStore } from '../store/projectStore';
 
 /** Doublon : "existing" est en base, "new" = nouvelles données */
 interface DuplicatesResult {
@@ -63,6 +64,8 @@ interface TeamState {
  * - (email + role + line_id) si team_manager
  * - (email + role) sinon
  */
+
+const { currentProject } = useProjectStore.getState();
 function buildUniqueKey(member: TeamMember): string {
   const lowerEmail = (member.email || '').toLowerCase().trim();
   const rolePart = member.role || '';
@@ -166,6 +169,9 @@ export const useTeamStore = create<TeamState>((set, get) => ({
       .single();
     if (error) throw error;
 
+    
+    const { currentProject } = useProjectStore.getState();
+
     // Envoi de l'email d'invitation
     const emailSuccess = await sendEmail(
       memberData.email!,
@@ -174,6 +180,8 @@ export const useTeamStore = create<TeamState>((set, get) => ({
       {
         role: memberData.role,
         inviteUrl: data.id, // On utilise l'ID du membre créé
+        projectName: currentProject ? currentProject.name : 'this project',
+ team_name: member.team_name, // Remplacer memberData.team_name par member.team_name
       }
     );
 
@@ -285,6 +293,8 @@ export const useTeamStore = create<TeamState>((set, get) => ({
       set({ loading: true, error: null });
       for (const member of members) {
         // Envoi d'email
+
+        const { currentProject } = useProjectStore.getState();
         await sendEmail(
           member.email,
           'You have been invited to join a project on Pilot',
@@ -292,7 +302,8 @@ export const useTeamStore = create<TeamState>((set, get) => ({
           {
             role: member.role,
             inviteUrl: member.id,
-              email: memberEmail,
+    projectName: currentProject ? currentProject.name : 'this project',
+    team_name: member.team_name, // Remplacer memberData.team_name par member.team_name
   
           }
         );

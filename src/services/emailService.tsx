@@ -69,7 +69,11 @@ const generateEmailHtml = (template: EmailTemplate, data: any): string => {
           <p>Need help? Contact our support team anytime.</p>
         </div>
       `;
- case 'TEAM_INVITE':
+
+
+
+      
+case 'TEAM_INVITE':
   // Construction du lien complet d'invitation
   const inviteLink = `${siteUrl}/invite/${data.inviteUrl}`;
   console.log('[generateEmailHtml] Final invite link:', inviteLink);
@@ -80,7 +84,8 @@ const generateEmailHtml = (template: EmailTemplate, data: any): string => {
       <p>
         You've been invited to join 
         <strong>${data.projectName || 'this project'}</strong> 
-        as a <strong>${data.role || 'member'}</strong>.
+        as a <strong>${data.role || 'member'}</strong>
+        ${data.team_name ? ' - Team: ' + data.team_name : ''}.
       </p>
       <p>Click the link below to accept your invitation:</p>
       <p>
@@ -89,12 +94,10 @@ const generateEmailHtml = (template: EmailTemplate, data: any): string => {
           Accept Invitation
         </a>
       </p>
-      <p>If the button doesn't work, copy and paste the following URL into your browser:</p>
-      <p style="word-break: break-all; color: #555;">
-        ${inviteLink}
-      </p>
     </div>
   `;
+
+
 
     case 'SUBSCRIPTION_STARTED':
       return `
