@@ -80,16 +80,6 @@ useEffect(() => {
   loadProjects();
 }, [user, navigate]);
 
-// ✅ Empêche la redirection prématurée vers /projects/new
-useEffect(() => {
-  if (!loading && projects.length === 0 && !currentProject) {
-    console.warn("[Dashboard] 🚨 Aucun projet trouvé, affichage temporaire de 'My First Project'");
-    setTimeout(() => setCurrentProject({ id: 'default', name: 'My First Project' }), 0);
-  } else if (!loading && projects.length > 0 && !currentProject) {
-    console.log("[Dashboard] ✅ Sélection automatique du premier projet :", projects[0].name);
-    setTimeout(() => setCurrentProject(projects[0]), 0);
-  }
-}, [loading, projects, currentProject, setCurrentProject]);
 
 
   useEffect(() => {

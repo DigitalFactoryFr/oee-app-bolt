@@ -4,6 +4,7 @@ import { Activity, Mail, Lock, Eye, EyeOff } from 'lucide-react';
 import { useAuthStore } from '../store/authStore';
 import { useProjectStore } from '../store/projectStore';
 import SocialAuth from './SocialAuth';
+import { Link } from 'react-router-dom'; 
 
 const AuthPage: React.FC = () => {
   const [searchParams] = useSearchParams();
@@ -99,10 +100,10 @@ useEffect(() => {
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col justify-center py-12 sm:px-6 lg:px-8">
       <div className="sm:mx-auto sm:w-full sm:max-w-md">
-        <div className="flex items-center justify-center">
-          <Activity className="h-8 w-8 text-blue-600" />
-          <span className="ml-2 text-xl font-bold text-gray-900">Pilot</span>
-        </div>
+  <Link to="/" className="flex items-center justify-center hover:opacity-80 transition-opacity duration-200">
+  <Activity className="h-8 w-8 text-blue-600" />
+  <span className="ml-2 text-xl font-bold text-gray-900">Pilot</span>
+</Link>
         <h2 className="mt-6 text-center text-3xl font-extrabold text-gray-900">
           {mode === 'login' ? 'Sign in to your account' : 'Create a new account'}
         </h2>

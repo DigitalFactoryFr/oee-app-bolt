@@ -50,6 +50,11 @@ import InvitePage from './pages/InvitePage';
 import CheckoutSuccessPage from './pages/CheckoutSuccessPage';
 import CheckoutCancelPage from './pages/CheckoutCancelPage';
 
+
+
+
+
+
 function App() {
   const { getUser } = useAuthStore();
 
@@ -57,6 +62,11 @@ function App() {
     getUser();
   }, [getUser]);
 
+useEffect(() => {
+  useProjectStore.getState().loadCurrentProject();
+}, []);
+
+  
   return (
     <Router>
       <Routes>
