@@ -29,7 +29,8 @@ export default function AuthCallback() {
         const { data: member, error: memberError } = await supabase
           .from('team_members')
           .select('*')
-          .eq('email', user.email)
+         .eq('email', user.email.toLowerCase())
+
           .maybeSingle();
 
         if (memberError || !member) {
