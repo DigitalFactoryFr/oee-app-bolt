@@ -12,6 +12,10 @@ export default function AuthCallback() {
   useEffect(() => {
     const checkUserSession = async () => {
       console.log("[AuthCallback] 🔄 Début de la vérification de la session...");
+      
+      // Récupérer returnTo dans l'URL
+      const searchParams = new URLSearchParams(window.location.search);
+      const returnTo = searchParams.get('returnTo');
 
       try {
         // Étape 1 : Vérifier si l'utilisateur est bien connecté
@@ -20,44 +24,44 @@ export default function AuthCallback() {
           console.error("[AuthCallback] ❌ Erreur ou utilisateur non trouvé :", error?.message);
           return navigate('/auth', { replace: true });
         }
-
         console.log("[AuthCallback] ✅ Utilisateur connecté :", user.email);
         setUser(user);
 
-        // Étape 2 : Vérifier si l'utilisateur appartient à un projet
+        // Si returnTo indique une invitation, rediriger vers InvitePage
+        if (returnTo && returnTo.startsWith('/invite/')) {
+          console.log("[AuthCallback] Redirection vers l'invitation:", returnTo);
+          return navigate(returnTo, { replace: true });
+        }
+
+        // Sinon, traiter la connexion normalement :
         console.log("[AuthCallback] 🔍 Recherche de l'utilisateur dans team_members...");
         const { data: member, error: memberError } = await supabase
           .from('team_members')
           .select('*')
-         .eq('email', user.email.toLowerCase())
-
+          .eq('email', user.email.toLowerCase())
           .maybeSingle();
 
         if (memberError || !member) {
           console.warn("[AuthCallback] ❌ Aucun projet trouvé pour cet utilisateur.");
           return navigate('/projects/new', { replace: true });
         }
-
         console.log(`[AuthCallback] 📌 Utilisateur trouvé avec statut : ${member.status}`);
 
-        // Étape 3 : Vérifier si l'utilisateur doit être activé
-if (member.status === "invited") {
-  console.log("[AuthCallback] 🔄 Mise à jour du statut en 'active'...");
+        // Si le membre est invité, vous pouvez ici choisir de l'accepter automatiquement
+        if (member.status === "invited") {
+          console.log("[AuthCallback] 🔄 Mise à jour du statut en 'active'...");
+          const { error: updateError } = await supabase
+            .from('team_members')
+            .update({ status: 'active' })
+            .eq('id', member.id);
+          if (updateError) {
+            console.error("[AuthCallback] ❌ Échec de la mise à jour du statut :", updateError.message);
+          } else {
+            console.log("[AuthCallback] ✅ Statut mis à jour en 'active'.");
+          }
+        }
 
-  const { error: updateError } = await supabase
-    .from('team_members')
-    .update({ status: 'active' })
-    .eq('id', member.id);
-
-  if (updateError) {
-    console.error("[AuthCallback] ❌ Échec de la mise à jour du statut :", updateError.message);
-  } else {
-    console.log("[AuthCallback] ✅ Statut mis à jour en 'active'.");
-  }
-}
-
-
-        // Étape 4 : Vérifier l'accès au projet
+        // Vérifier l'accès au projet
         console.log("[AuthCallback] 🔄 Vérification de l'accès au projet...");
         const { data: project, error: projectError } = await supabase
           .from('projects')
@@ -70,11 +74,8 @@ if (member.status === "invited") {
           return navigate('/projects/new', { replace: true });
         }
 
-    console.log("[AuthCallback] 🚀 Redirection vers le dashboard");
-navigate(`/projects/${member.project_id}`, { replace: true });
-
-
-
+        console.log("[AuthCallback] 🚀 Redirection vers le projet");
+        navigate(`/projects/${member.project_id}`, { replace: true });
 
       } catch (err) {
         console.error("[AuthCallback] ⚠️ Erreur inattendue :", err);
