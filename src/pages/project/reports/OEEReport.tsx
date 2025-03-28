@@ -338,60 +338,96 @@ const OEEReport: React.FC = () => {
         }>();
 
         // 1) Parcourir les lots
-        lotsResult.data?.forEach((lot: any) => {
-          const dayStr = lot.date || format(new Date(lot.start_time), 'yyyy-MM-dd');
-          if (!dateMap.has(dayStr)) {
-            dateMap.set(dayStr, {
-              date: dayStr,
-              plannedTime: 0,
-              plannedStops: 0,
-              unplannedStops: 0,
-              okParts: 0,
-              scrapParts: 0,
-              netTimeSec: 0
-            });
-          }
-          const obj = dateMap.get(dayStr)!;
-          // Durée planifiée
-          const st = new Date(lot.start_time);
-          const et = lot.end_time ? new Date(lot.end_time) : new Date();
-          const durMin = Math.max(0, differenceInMinutes(et, st));
-          obj.plannedTime += durMin;
+lotsResult.data?.forEach((lot: any) => {
+  const dayStr = lot.date || format(new Date(lot.start_time), 'yyyy-MM-dd');
+  if (!dateMap.has(dayStr)) {
+    dateMap.set(dayStr, {
+      date: dayStr,
+      plannedTime: 0,
+      plannedStops: 0,
+      unplannedStops: 0,
+      okParts: 0,
+      scrapParts: 0,
+      netTimeSec: 0
+    });
+  }
+  const obj = dateMap.get(dayStr)!;
 
-          // Temps net théorique
-          if (lot.products?.cycle_time && lot.ok_parts_produced > 0) {
-            obj.netTimeSec += lot.ok_parts_produced * lot.products.cycle_time;
-          }
-          // Pièces OK
-          obj.okParts += lot.ok_parts_produced;
-        });
+  // Récupérer la plage
+  // On a déjà { startDate, endDate } en dehors de ce forEach
+  // => const { startDate, endDate } = getDateRange(selectedPeriod);
+
+  // Récupère startTime/endTime du lot
+  let st = new Date(lot.start_time);
+  let et = lot.end_time ? new Date(lot.end_time) : new Date();
+
+  // -------------------- AJOUT : BORNER LES DATES --------------------
+  // 1) Si le lot a commencé avant la plage, on borne à startDate
+  if (st < startDate) {
+    st = startDate;
+  }
+  // 2) Si le lot se termine après la plage (ou pas fini), on borne à endDate
+  if (et > endDate) {
+    et = endDate;
+  }
+  // ---------------------------------------------------------------
+
+  // Durée planifiée (en minutes)
+  const durMin = Math.max(0, differenceInMinutes(et, st));
+  obj.plannedTime += durMin;
+
+  // Calcul du temps net théorique
+  if (lot.products?.cycle_time && lot.ok_parts_produced > 0) {
+    obj.netTimeSec += lot.ok_parts_produced * lot.products.cycle_time;
+  }
+
+  // Pièces OK
+  obj.okParts += lot.ok_parts_produced;
+}); // Fin du forEach lots
+
 
         // 2) Parcourir les arrêts
-        stopsResult.data?.forEach((stop: any) => {
-          const dayStr = stop.date || format(new Date(stop.start_time), 'yyyy-MM-dd');
-          if (!dateMap.has(dayStr)) {
-            dateMap.set(dayStr, {
-              date: dayStr,
-              plannedTime: 0,
-              plannedStops: 0,
-              unplannedStops: 0,
-              okParts: 0,
-              scrapParts: 0,
-              netTimeSec: 0
-            });
-          }
-          const obj = dateMap.get(dayStr)!;
-          const st = new Date(stop.start_time);
-          const et = stop.end_time ? new Date(stop.end_time) : new Date();
-          const durMin = Math.max(0, differenceInMinutes(et, st));
+stopsResult.data?.forEach((stop: any) => {
+  const dayStr = stop.date || format(new Date(stop.start_time), 'yyyy-MM-dd');
+  if (!dateMap.has(dayStr)) {
+    dateMap.set(dayStr, {
+      date: dayStr,
+      plannedTime: 0,
+      plannedStops: 0,
+      unplannedStops: 0,
+      okParts: 0,
+      scrapParts: 0,
+      netTimeSec: 0
+    });
+  }
+  const obj = dateMap.get(dayStr)!;
 
-          // Arrêt planifié => PA
-          if (stop.failure_type === 'PA') {
-            obj.plannedStops += durMin;
-          }
-          // Sinon unplanned
-          obj.unplannedStops += durMin;
-        });
+  // Start/end
+  let sTime = new Date(stop.start_time);
+  let eTime = stop.end_time ? new Date(stop.end_time) : new Date();
+
+  // -------------------- AJOUT : BORNER LES DATES --------------------
+  // S’il commence avant startDate
+  if (sTime < startDate) {
+    sTime = startDate;
+  }
+  // S’il finit après endDate ou n’est pas terminé
+  if (eTime > endDate) {
+    eTime = endDate;
+  }
+  // ---------------------------------------------------------------
+
+  // Durée
+  const durMin = Math.max(0, differenceInMinutes(eTime, sTime));
+
+  // Arrêt planifié => PA
+  if (stop.failure_type === 'PA') {
+    obj.plannedStops += durMin;
+  }
+  // Sinon unplanned
+  obj.unplannedStops += durMin;
+}); // Fin du forEach stops
+
 
         // 3) Parcourir la qualité (scrap)
         qualityResult.data?.forEach((issue: any) => {

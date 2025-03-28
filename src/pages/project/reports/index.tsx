@@ -389,6 +389,16 @@ async function getLineIdsByName(names: string[]): Promise<string[]> {
     }
   }
 
+  function getPreviousRange(period: PeriodType) {
+  const { startDate, endDate } = getDateRange(period); // ta fonction existante
+  const duration = endDate.getTime() - startDate.getTime();
+  return {
+    startDate: new Date(startDate.getTime() - duration),
+    endDate: new Date(endDate.getTime() - duration)
+  };
+}
+
+
   // ------------------- loadData (pour affichage normal) -------------------
   async function loadData() {
     if (!projectId) return;
@@ -542,51 +552,26 @@ let totalPannesTime = 0;
       }
 
       // 1) Parcourir lots
-      lotsResult.data?.forEach((lot: any) => {
-        const dayStr = format(new Date(lot.start_time), 'yyyy-MM-dd');
-        if (!dateMap.has(dayStr)) {
-          dateMap.set(dayStr, {
-            date: dayStr,
-            plannedTime: 0,
-            plannedStops: 0,
-            unplannedStops: 0,
-            netTimeSec: 0,
-            okParts: 0,
-            scrapParts: 0,
-            rework: 0,
-            other: 0,
-            actual: 0,
-            target: 0
-          });
-        }
-        const obj = dateMap.get(dayStr);
-        const st = new Date(lot.start_time);
-        const et = lot.end_time ? new Date(lot.end_time) : new Date();
-        const durMin = Math.max(0, differenceInMinutes(et, st));
-        obj.plannedTime += durMin;
+// ...
+// 1) Parcourir les lots
+// -------------------- LOADDATA - LOTS --------------------
+lotsResult.data?.forEach((lot: any) => {
+  // Récupère start/end
+  const st = new Date(lot.start_time);
+  let et = lot.end_time ? new Date(lot.end_time) : new Date();
 
-        if (lot.products?.cycle_time && lot.ok_parts_produced > 0) {
-          obj.netTimeSec += (lot.ok_parts_produced * lot.products.cycle_time);
-        }
-        obj.okParts += lot.ok_parts_produced;
-        obj.actual += lot.ok_parts_produced;
+  // Borne la fin à endDate si ça dépasse
+  if (et > endDate) {
+    et = endDate;
+  }
 
-        if (lot.lot_size > 0 && durMin > 0) {
-          const now = new Date();
-          const elapsed = differenceInMinutes(now > et ? et : now, st);
-          const ratio = Math.min(elapsed / durMin, 1);
-          obj.target += Math.round(ratio * lot.lot_size);
-        }
-      });
+  // Calcule la durée en minutes
+  const durMin = Math.max(0, differenceInMinutes(et, st));
 
-      // 2) Parcourir stops
-stopsResult.data?.forEach((stop: any) => {
-  const sTime = new Date(stop.start_time);
-  const eTime = stop.end_time ? new Date(stop.end_time) : new Date();
-  const durMin = Math.max(0, differenceInMinutes(eTime, sTime));
-  const dayStr = format(sTime, 'yyyy-MM-dd');
+  // Formate le jour (aaaa-mm-jj)
+  const dayStr = format(st, 'yyyy-MM-dd');
 
-  // Mise à jour de la map de données par jour
+  // Initialise la case du dateMap si elle n’existe pas
   if (!dateMap.has(dayStr)) {
     dateMap.set(dayStr, {
       date: dayStr,
@@ -603,33 +588,94 @@ stopsResult.data?.forEach((stop: any) => {
     });
   }
   const obj = dateMap.get(dayStr);
-  const hours = durMin / 60;
 
-  // Utiliser mapFailureType une seule fois pour convertir la valeur
-  const ft = mapFailureType(stop.failure_type);
- if (ft === 'PA') {
-        globalPannes += 1;
-   totalPannesTime += hours;
-      }
-  
-  addDowntime(ft, hours);
-  
-  obj.unplannedStops += durMin;
+  // Incrémente plannedTime
+  obj.plannedTime += durMin;
 
-  // Mise à jour de la map pour le StopTimeChart avec des clés en majuscules pour les valeurs reconnues
-  if (!stopMap.has(dayStr)) {
-    stopMap.set(dayStr, {
+  // Si cycle_time, on ajoute au netTimeSec (ok_parts_produced * cycle_time)
+  if (lot.products?.cycle_time && lot.ok_parts_produced > 0) {
+    obj.netTimeSec += lot.ok_parts_produced * lot.products.cycle_time;
+  }
+
+  // OK parts
+  obj.okParts += lot.ok_parts_produced;
+  obj.actual += lot.ok_parts_produced;
+
+  // Calcul du target (optionnel)
+  if (lot.lot_size > 0 && durMin > 0) {
+    const now = new Date();
+    const elapsed = differenceInMinutes(now > et ? et : now, st);
+    const ratio = Math.min(elapsed / durMin, 1);
+    obj.target += Math.round(ratio * lot.lot_size);
+  }
+});
+// -------------------- Fin du forEach LOTS --------------------
+
+
+
+      // 2) Parcourir stops
+// ...
+// 2) Parcourir les arrêts
+// -------------------- LOADDATA - STOPS --------------------
+stopsResult.data?.forEach((stop: any) => {
+  // Récupère start/end
+  const sTime = new Date(stop.start_time);
+  let eTime = stop.end_time ? new Date(stop.end_time) : new Date();
+
+  // Borne la fin à endDate si ça dépasse
+  if (eTime > endDate) {
+    eTime = endDate;
+  }
+
+  // Durée
+  const durMin = Math.max(0, differenceInMinutes(eTime, sTime));
+  const dayStr = format(sTime, 'yyyy-MM-dd');
+
+  // Initialise la case du dateMap si elle n’existe pas
+  if (!dateMap.has(dayStr)) {
+    dateMap.set(dayStr, {
       date: dayStr,
-      AP: 0, PA: 0, DO: 0, NQ: 0, CS: 0
+      plannedTime: 0,
+      plannedStops: 0,
+      unplannedStops: 0,
+      netTimeSec: 0,
+      okParts: 0,
+      scrapParts: 0,
+      rework: 0,
+      other: 0,
+      actual: 0,
+      target: 0
     });
   }
+  const obj = dateMap.get(dayStr);
+
+  // Convertir en heures
+  const hours = durMin / 60;
+  const ft = mapFailureType(stop.failure_type);
+
+  // Exemple : si PA => pannes +1
+  if (ft === 'PA') {
+    globalPannes += 1;
+    totalPannesTime += hours;
+  }
+
+  // Ajoute durMin aux unplannedStops (ou plannedStops selon la logique)
+  obj.unplannedStops += durMin;
+
+  // Ajout à la distribution downtime
+  addDowntime(ft, hours);
+
+  // Mise à jour de stopMap (pour le StopTimeChart)
+  if (!stopMap.has(dayStr)) {
+    stopMap.set(dayStr, { date: dayStr, AP: 0, PA: 0, DO: 0, NQ: 0, CS: 0 });
+  }
   const stObj = stopMap.get(dayStr);
+
   if (ft === 'AP') {
     stObj.AP += hours;
   } else if (ft === 'PA') {
     stObj.PA += hours;
-    // Si c'est un arrêt planifié
-    obj.plannedStops += durMin;
+    obj.plannedStops += durMin;  // si c’est un arrêt planifié
   } else if (ft === 'DO') {
     stObj.DO += hours;
   } else if (ft === 'NQ') {
@@ -638,6 +684,10 @@ stopsResult.data?.forEach((stop: any) => {
     stObj.CS += hours;
   }
 });
+// -------------------- Fin du forEach STOPS --------------------
+
+// ...
+
 
 
       // 3) Parcourir quality
@@ -996,88 +1046,121 @@ let globalRework = 0;
   }
 
   // Traitement des lots
-  lotsResult.data?.forEach((lot: any) => {
-    const dayStr = format(new Date(lot.start_time), 'yyyy-MM-dd');
-    if (!dateMap.has(dayStr)) {
-      dateMap.set(dayStr, {
-        date: dayStr,
-        plannedTime: 0,
-        plannedStops: 0,
-        unplannedStops: 0,
-        netTimeSec: 0,
-        okParts: 0,
-        scrapParts: 0,
-        rework: 0,
-        other: 0,
-        actual: 0,
-        target: 0
-      });
-    }
-    const obj = dateMap.get(dayStr);
-    const st = new Date(lot.start_time);
-    const et = lot.end_time ? new Date(lot.end_time) : new Date();
-    const durMin = Math.max(0, differenceInMinutes(et, st));
-    obj.plannedTime += durMin;
-    if (lot.products?.cycle_time && lot.ok_parts_produced > 0) {
-      obj.netTimeSec += lot.ok_parts_produced * lot.products.cycle_time;
-    }
-    obj.okParts += lot.ok_parts_produced;
-    obj.actual += lot.ok_parts_produced;
-    if (lot.lot_size > 0 && durMin > 0) {
-      const now = new Date();
-      const elapsed = differenceInMinutes(now > et ? et : now, st);
-      const ratio = Math.min(elapsed / durMin, 1);
-      obj.target += Math.round(ratio * lot.lot_size);
-    }
-  });
+// Dans loadComparisonData(...)
+// -------------------- LOADCOMPARISONDATA - LOTS --------------------
+lotsResult.data?.forEach((lot: any) => {
+  const st = new Date(lot.start_time);
+  let et = lot.end_time ? new Date(lot.end_time) : new Date();
+
+  // Borne à endDate
+  if (et > endDate) {
+    et = endDate;
+  }
+
+  // Durée min
+  const durMin = Math.max(0, differenceInMinutes(et, st));
+  const dayStr = format(st, 'yyyy-MM-dd');
+
+  if (!dateMap.has(dayStr)) {
+    dateMap.set(dayStr, {
+      date: dayStr,
+      plannedTime: 0,
+      plannedStops: 0,
+      unplannedStops: 0,
+      netTimeSec: 0,
+      okParts: 0,
+      scrapParts: 0,
+      rework: 0,
+      other: 0,
+      actual: 0,
+      target: 0
+    });
+  }
+  const obj = dateMap.get(dayStr);
+
+  // updated plannedTime
+  obj.plannedTime += durMin;
+
+  if (lot.products?.cycle_time && lot.ok_parts_produced > 0) {
+    obj.netTimeSec += lot.ok_parts_produced * lot.products.cycle_time;
+  }
+  obj.okParts += lot.ok_parts_produced;
+  obj.actual += lot.ok_parts_produced;
+
+  if (lot.lot_size > 0 && durMin > 0) {
+    const now = new Date();
+    const elapsed = differenceInMinutes(now > et ? et : now, st);
+    const ratio = Math.min(elapsed / durMin, 1);
+    obj.target += Math.round(ratio * lot.lot_size);
+  }
+});
+// -------------------- Fin du forEach LOTS (Comparison) --------------------
+
+// ← Fin du forEach lots
+
 
   // Traitement des arrêts
-  stopsResult.data?.forEach((stop: any) => {
-    const sTime = new Date(stop.start_time);
-    const eTime = stop.end_time ? new Date(stop.end_time) : new Date();
-    const durMin = Math.max(0, differenceInMinutes(eTime, sTime));
-    const dayStr = format(sTime, 'yyyy-MM-dd');
-    if (!dateMap.has(dayStr)) {
-      dateMap.set(dayStr, {
-        date: dayStr,
-        plannedTime: 0,
-        plannedStops: 0,
-        unplannedStops: 0,
-        netTimeSec: 0,
-        okParts: 0,
-        scrapParts: 0,
-        rework: 0,
-        other: 0,
-        actual: 0,
-        target: 0
-      });
-    }
-    const obj = dateMap.get(dayStr);
-    const hours = durMin / 60;
-    const ft = mapFailureType(stop.failure_type);
-     if (ft === 'PA') {
+// -------------------- LOADCOMPARISONDATA - STOPS --------------------
+stopsResult.data?.forEach((stop: any) => {
+  const sTime = new Date(stop.start_time);
+  let eTime = stop.end_time ? new Date(stop.end_time) : new Date();
+
+  // Borne à endDate
+  if (eTime > endDate) {
+    eTime = endDate;
+  }
+
+  const durMin = Math.max(0, differenceInMinutes(eTime, sTime));
+  const dayStr = format(sTime, 'yyyy-MM-dd');
+
+  if (!dateMap.has(dayStr)) {
+    dateMap.set(dayStr, {
+      date: dayStr,
+      plannedTime: 0,
+      plannedStops: 0,
+      unplannedStops: 0,
+      netTimeSec: 0,
+      okParts: 0,
+      scrapParts: 0,
+      rework: 0,
+      other: 0,
+      actual: 0,
+      target: 0
+    });
+  }
+  const obj = dateMap.get(dayStr);
+
+  const hours = durMin / 60;
+  const ft = mapFailureType(stop.failure_type);
+
+  if (ft === 'PA') {
     globalPannes += 1;
     totalPannesTime += hours;
   }
-    addDowntime(ft, hours);
-    obj.unplannedStops += durMin;
-    if (!stopMap.has(dayStr)) {
-      stopMap.set(dayStr, { date: dayStr, AP: 0, PA: 0, DO: 0, NQ: 0, CS: 0 });
-    }
-    const stObj = stopMap.get(dayStr);
-    if (ft === 'AP') {
-      stObj.AP += hours;
-    } else if (ft === 'PA') {
-      stObj.PA += hours;
-      obj.plannedStops += durMin;
-    } else if (ft === 'DO') {
-      stObj.DO += hours;
-    } else if (ft === 'NQ') {
-      stObj.NQ += hours;
-    } else {
-      stObj.CS += hours;
-    }
-  });
+
+  obj.unplannedStops += durMin;
+  addDowntime(ft, hours);
+
+  if (!stopMap.has(dayStr)) {
+    stopMap.set(dayStr, { date: dayStr, AP: 0, PA: 0, DO: 0, NQ: 0, CS: 0 });
+  }
+  const stObj = stopMap.get(dayStr);
+
+  if (ft === 'AP') {
+    stObj.AP += hours;
+  } else if (ft === 'PA') {
+    stObj.PA += hours;
+    obj.plannedStops += durMin;
+  } else if (ft === 'DO') {
+    stObj.DO += hours;
+  } else if (ft === 'NQ') {
+    stObj.NQ += hours;
+  } else {
+    stObj.CS += hours;
+  }
+});
+// -------------------- Fin du forEach STOPS (Comparison) --------------------
+
 
   // Traitement des issues qualité
  qualityResult.data?.forEach((issue: any) => {
