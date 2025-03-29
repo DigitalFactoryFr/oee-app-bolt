@@ -300,6 +300,8 @@ const RealTimeMonitoring: React.FC = () => {
 
       // ========== LOTS ==========
       lotsRes.data?.forEach((lot:any)=>{
+          if (!lot.machine) return;
+
         const mid = lot.machine.id;
         const mName= lot.machine.name;
         events.push({

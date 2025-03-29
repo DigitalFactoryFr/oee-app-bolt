@@ -1522,7 +1522,7 @@ stopsResult.data?.forEach((stop: any) => {
       <span className="text-3xl font-bold text-blue-600">
         {metrics.oee.toFixed(1)}%
       </span>
-      <span className="text-sm text-green-600">↑ 2.3%</span>
+      <span className="text-sm text-green-600">↑ 0.0%</span>
     </div>
   </div>
 
@@ -1539,7 +1539,7 @@ stopsResult.data?.forEach((stop: any) => {
           <span className="text-3xl font-bold text-blue-600">
             {comparisonMetrics.oee.toFixed(1)}%
           </span>
-          <span className="text-sm text-green-600">↑ 1.5%</span>
+          <span className="text-sm text-green-600">↑ 0.0%</span>
         </div>
       </div>
     </div>
@@ -1609,7 +1609,7 @@ stopsResult.data?.forEach((stop: any) => {
       <span className="text-3xl font-bold text-gray-900">
         {(metrics.totalProduction ?? 0).toLocaleString()}
       </span>
-      <span className="text-sm text-green-600">↑ 5.7%</span>
+      <span className="text-sm text-green-600">↑ 0.0%</span>
     </div>
   </div>
 

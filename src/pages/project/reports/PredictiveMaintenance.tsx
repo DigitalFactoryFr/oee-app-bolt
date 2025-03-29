@@ -1,630 +1,844 @@
 import React, { useState, useEffect } from 'react';
 import { useParams } from 'react-router-dom';
-import { format, subDays, differenceInHours, addDays, differenceInDays } from 'date-fns';
-import { Calendar, Download, Filter, ChevronDown, PenTool as Tool, AlertTriangle, ArrowUp, ArrowDown, Activity, Clock, CheckCircle, Brain } from 'lucide-react';
+import {
+  format,
+  subDays,
+  differenceInMinutes,
+  differenceInDays,
+  addDays,
+  startOfToday,
+  endOfToday,
+  startOfWeek,
+  endOfWeek,
+  startOfMonth,
+  endOfMonth,
+  startOfYear,
+  endOfYear
+} from 'date-fns';
+import {
+  Calendar,
+  Download,
+  ChevronDown,
+  AlertTriangle,
+  Clock,
+  Activity,
+  Search
+} from 'lucide-react';
+
 import ProjectLayout from '../../../components/layout/ProjectLayout';
 import { supabase } from '../../../lib/supabase';
+
+// ================== Types ==================
+type TimeRangeType = '7d' | '30d' | '90d';
+
+/** 
+ * Category filter: 
+ * - ALL => no restriction
+ * - PA => Failures
+ * - NQ => Non-Quality
+ * - CS => Series Changes
+ * - DO => Scheduled Deviation
+ * - SCRAP => Scrap
+ * - REWORK => Rework
+ */
+type CategoryFilterType = 'ALL' | 'PA' | 'NQ' | 'CS' | 'DO' | 'SCRAP' | 'REWORK';
+
+/**
+ * expectedDateFilter => filter the cause nextOccurrence by date range 
+ * e.g. "TODAY", "THIS_WEEK", "THIS_MONTH", ...
+ */
+type ExpectedDateFilter =
+  | 'ALL'
+  | 'TODAY'
+  | 'THIS_WEEK'
+  | 'THIS_MONTH'
+  | 'NEXT_MONTH'
+  | 'NEXT_6_MONTHS'
+  | 'THIS_YEAR';
+
+interface FailureCause {
+  type: string;          
+  causeText: string;     
+  occurrences: number;   
+  totalDurationH: number; 
+  scrapCount: number;    
+  reworkCount: number;   
+  probability: number;    
+  severity: number;       
+  riskScore: number;      
+  nextOccurrence: string; // e.g. '2025-04-05'
+}
 
 interface MachineHealth {
   id: string;
   name: string;
+
+  // Performance KPI
+  totalDowntimeH: number; // unplanned
   mtbf: number;
   mttr: number;
-  failureRate: number;
-  riskScore: number;
-  nextPredictedFailure: string;
-  recentStops: number;
-  totalDowntime: number;
+  recentStops: number; // based on the selected period => last X days
+
+  // Quality KPI
+  totalScrap: number;
+  totalRework: number;
+
+  riskScore: number;      
+  causeList: FailureCause[];
+
   sampleSize: {
-    total: number;
-    analyzed: number;
+    totalLots: number;
+    totalOkParts: number;
   };
-  commonFailures: {
-    type: string;
-    count: number;
-    avgDuration: number;
-    probability: number;
-    severity: 'critical' | 'high' | 'medium' | 'low';
-    recommendedAction: string;
-    estimatedImpact: number;
-    nextOccurrence: string;
-    sampleData: {
-      total: number;
-      affected: number;
-    };
-  }[];
-  trend: number;
+
+  nextFailureGlobal: string; // earliest cause date
 }
 
-interface FailurePrediction {
-  machineId: string;
-  probability: number;
-  suggestedDate: string;
-  confidence: number;
-  severity: 'critical' | 'high' | 'medium' | 'low';
-  mostLikelyCause: string;
-  recommendedAction: string;
-  estimatedTimeToFailure: number;
-  sampleSize: {
-    total: number;
-    affected: number;
-  };
-  factors: {
-    name: string;
-    impact: number;
-  }[];
-}
-
-type TimeRangeType = '7d' | '30d' | '90d';
-
-const formatDuration = (hours: number): string => {
-  const h = Math.floor(hours);
-  const m = Math.round((hours - h) * 60);
-  return `${h}h ${m}m`;
-};
-
-const calculateAffectedPartsEstimate = (
-  historicalAffected: number,
-  totalParts: number,
-  timeRange: number,
-  failureType: string
-): number => {
-  if (timeRange <= 0 || totalParts <= 0) return 0;
-
-  // Calculate daily rate based on historical data
-  const dailyRate = historicalAffected / timeRange;
-  
-  // Project forward for next 30 days with different factors based on failure type
-  let projectedAffected = dailyRate * 30;
-  
-  // Adjust projection based on failure type
-  switch (failureType) {
-    case 'PA': // Equipment breakdown - more conservative estimate
-      projectedAffected *= 0.8;
-      break;
-    case 'NQ': // Quality issues - more aggressive estimate
-      projectedAffected *= 1.2;
-      break;
-    default:
-      projectedAffected *= 1;
+// ================== Helpers ==================
+function getDateRange(range: TimeRangeType){
+  const now = new Date();
+  switch(range){
+    case '7d':  return { start: subDays(now,7), end: now, days:7 };
+    case '90d': return { start: subDays(now,90), end: now, days:90 };
+    default:    return { start: subDays(now,30), end: now, days:30 };
   }
+}
 
-  // Add controlled randomness (±5%)
-  const variance = Math.random() * 0.1 - 0.05;
-  
-  // Calculate maximum allowed affected parts (based on failure type)
-  const maxAffectedRatio = failureType === 'PA' ? 0.15 : 0.1; // 15% for breakdowns, 10% for others
-  const maxAffected = Math.round(totalParts * maxAffectedRatio);
-  
-  // Return the minimum between projected and maximum allowed
-  return Math.min(
-    Math.round(projectedAffected * (1 + variance)),
-    maxAffected
-  );
-};
-
-const PredictiveMaintenance: React.FC = () => {
-  const { projectId } = useParams<{ projectId: string }>();
-  const [selectedPeriod, setSelectedPeriod] = useState<TimeRangeType>('30d');
-  const [showPeriodDropdown, setShowPeriodDropdown] = useState(false);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [machineHealth, setMachineHealth] = useState<MachineHealth[]>([]);
-  const [predictions, setPredictions] = useState<Record<string, FailurePrediction>>({});
-
-  useEffect(() => {
-    if (projectId) {
-      analyzeMachineHealth();
+/** 
+ * nextOccurrence => we parse => filter by "expectedDateFilter"
+ * We'll define a helper function to get the [start, end] range for each.
+ */
+function getExpectedDateRange(edf: ExpectedDateFilter){
+  const now = new Date();
+  switch(edf){
+    case 'TODAY':
+      return { start: startOfToday(), end: endOfToday() };
+    case 'THIS_WEEK':
+      return { start: startOfWeek(now), end: endOfWeek(now) };
+    case 'THIS_MONTH':
+      return { start: startOfMonth(now), end: endOfMonth(now) };
+    case 'NEXT_MONTH': {
+      // next month => from endOfMonth(thisMonth)+1day to endOfMonth nextMonth 
+      const startOfNextMonth = addDays(endOfMonth(now), 1);
+      const endOfNextMonth   = endOfMonth(startOfNextMonth);
+      return { start: startOfNextMonth, end: endOfNextMonth };
     }
-  }, [projectId, selectedPeriod]);
+    case 'NEXT_6_MONTHS': {
+      // we do now => addDays(180)
+      return { start: now, end: addDays(now, 180) };
+    }
+    case 'THIS_YEAR':
+      return { start: startOfYear(now), end: endOfYear(now) };
+    default: // 'ALL'
+      return null; // means no filter
+  }
+}
 
-  const analyzeMachineHealth = async () => {
-    if (!projectId) return;
+function mapStopFailureType(ft: string|null|undefined){
+  const s = (ft||'').toLowerCase();
+  switch(s){
+    case 'ap':
+    case 'pa':
+    case 'nq':
+    case 'cs':
+    case 'do':
+      return s.toUpperCase();
+    default:
+      return 'CS'; // fallback
+  }
+}
 
-    try {
+function mapQualityCategory(cat: string|null|undefined){
+  const s = (cat||'').toLowerCase();
+  if(s.includes('scrap')) return 'SCRAP';
+  if(s.includes('rework'))return 'REWORK';
+  return 'NQ';
+}
+
+function getCategoryIcon(type: string){
+  switch(type.toUpperCase()){
+    case 'PA': return <AlertTriangle className="h-5 w-5 text-red-500 mr-1"/>;
+    case 'NQ': return <AlertTriangle className="h-5 w-5 text-yellow-500 mr-1"/>;
+    case 'CS': return <Activity className="h-5 w-5 text-gray-500 mr-1"/>;
+    case 'DO': return <Clock className="h-5 w-5 text-blue-500 mr-1"/>;
+    case 'SCRAP': return <AlertTriangle className="h-5 w-5 text-red-400 mr-1"/>;
+    case 'REWORK':return <AlertTriangle className="h-5 w-5 text-purple-400 mr-1"/>;
+    default:    return <Activity className="h-5 w-5 text-gray-400 mr-1"/>;
+  }
+}
+
+function getRiskColor(score: number){
+  if(score>=75) return 'bg-red-100 text-red-800';
+  if(score>=50) return 'bg-orange-100 text-orange-800';
+  if(score>=25) return 'bg-yellow-100 text-yellow-800';
+  return 'bg-green-100 text-green-800';
+}
+
+function formatDuration(h: number){
+  const hh = Math.floor(h);
+  const mm = Math.round((h - hh)*60);
+  return `${hh}h ${mm}m`;
+}
+
+function isPerformanceCat(cat:CategoryFilterType){
+  return ['PA','NQ','CS','DO'].includes(cat);
+}
+function isQualityCat(cat:CategoryFilterType){
+  return ['SCRAP','REWORK'].includes(cat);
+}
+
+// ================== MAIN ==================
+const PredictiveInsights:React.FC = () => {
+  const { projectId } = useParams<{ projectId: string }>();
+
+  // timeRange
+  const [timeRange, setTimeRange] = useState<TimeRangeType>('30d');
+  const [showRangeDropdown, setShowRangeDropdown] = useState(false);
+
+  // filters
+  const [machineSearch, setMachineSearch] = useState('');
+  const [categoryFilter, setCategoryFilter] = useState<CategoryFilterType>('ALL');
+  const [expectedDateFilter, setExpectedDateFilter] = useState<ExpectedDateFilter>('ALL');
+
+  // data
+  const [loading, setLoading] = useState(false);
+  const [error, setError]   = useState<string|null>(null);
+  const [machineList, setMachineList] = useState<MachineHealth[]>([]);
+
+  useEffect(()=>{
+    if(projectId){
+      fetchData();
+    }
+  },[projectId, timeRange, machineSearch, categoryFilter, expectedDateFilter]);
+
+  async function fetchData(){
+    try{
       setLoading(true);
       setError(null);
-      console.log("🔄 Starting machine health analysis...");
 
-      // Calculate date range
-      const endDate = new Date();
-      let startDate: Date;
-      switch (selectedPeriod) {
-        case '7d':
-          startDate = subDays(endDate, 7);
-          break;
-        case '30d':
-          startDate = subDays(endDate, 30);
-          break;
-        case '90d':
-          startDate = subDays(endDate, 90);
-          break;
-        default:
-          startDate = subDays(endDate, 30);
+      // get range
+      const { start, end, days } = getDateRange(timeRange);
+      console.log('Predictive => from', start.toISOString(),'to', end.toISOString(), 'days=',days);
+
+      // 1) machines
+      let machQ = supabase
+        .from('machines')
+        .select('id,name')
+        .eq('project_id', projectId);
+      if(machineSearch){
+        machQ = machQ.ilike('name', `%${machineSearch}%`);
+      }
+      const { data:machData, error:machErr } = await machQ;
+      if(machErr) throw machErr;
+      if(!machData || machData.length===0){
+        setMachineList([]);
+        setLoading(false);
+        return;
       }
 
-      // Fetch all required data
-      const [machinesResult, stopsResult, lotsResult] = await Promise.all([
-        supabase
-          .from('machines')
-          .select('*')
-          .eq('project_id', projectId),
-        supabase
-          .from('stop_events')
-          .select('*')
-          .eq('project_id', projectId)
-          .in('failure_type', ['PA', 'NQ'])
-          .gte('date', format(startDate, 'yyyy-MM-dd')),
-        supabase
-          .from('lots')
-          .select('*')
-          .eq('project_id', projectId)
-          .gte('date', format(startDate, 'yyyy-MM-dd'))
-      ]);
+      // 2) load lots
+      const { data:lotsData, error:lotsErr } = await supabase
+        .from('lots')
+        .select(`
+          id,
+          machine,
+          start_time,
+          end_time,
+          lot_size,
+          ok_parts_produced
+        `)
+        .eq('project_id', projectId)
+        .gte('start_time', start.toISOString())
+        .lte('start_time', end.toISOString());
+      if(lotsErr) throw lotsErr;
 
-      if (machinesResult.error) throw machinesResult.error;
-      if (stopsResult.error) throw stopsResult.error;
-      if (lotsResult.error) throw lotsResult.error;
+      // 3) load stops
+      let stopsQ = supabase
+        .from('stop_events')
+        .select(`
+          id,
+          machine,
+          start_time,
+          end_time,
+          failure_type,
+          cause
+        `)
+        .eq('project_id', projectId)
+        .gte('start_time', start.toISOString())
+        .lte('start_time', end.toISOString());
+      if(categoryFilter!=='ALL'){
+        if(isPerformanceCat(categoryFilter)){
+          stopsQ= stopsQ.eq('failure_type', categoryFilter);
+        } else if(isQualityCat(categoryFilter)){
+          stopsQ= stopsQ.eq('failure_type','???'); // no stops
+        }
+      }
+      const { data:stopsData, error:stopsErr } = await stopsQ;
+      if(stopsErr) throw stopsErr;
 
-      const machines = machinesResult.data || [];
-      const stops = stopsResult.data || [];
-      const lots = lotsResult.data || [];
+      // 4) load quality_issues
+      let qualQ = supabase
+        .from('quality_issues')
+        .select(`
+          id,
+          machine,
+          start_time,
+          end_time,
+          category,
+          cause,
+          quantity
+        `)
+        .eq('project_id', projectId)
+        .gte('start_time', start.toISOString())
+        .lte('start_time', end.toISOString());
+      if(categoryFilter!=='ALL'){
+        if(isQualityCat(categoryFilter)){
+          // "SCRAP" => cat ~ '%scrap%', "REWORK" => cat~'%rework%'
+          if(categoryFilter==='SCRAP'){
+            qualQ= qualQ.ilike('category','%scrap%');
+          } else {
+            qualQ= qualQ.ilike('category','%rework%');
+          }
+        } else if(isPerformanceCat(categoryFilter)){
+          qualQ= qualQ.eq('category','???'); // no results
+        }
+      }
+      const { data:qualData, error:qualErr } = await qualQ;
+      if(qualErr) throw qualErr;
 
-      // Analyze each machine
-      const healthData: MachineHealth[] = await Promise.all(
-        machines.map(async (machine) => {
-          // Get machine-specific data
-          const machineStops = stops.filter(stop => stop.machine === machine.id);
-          const machineLots = lots.filter(lot => lot.machine === machine.id);
+      // =========== Build machineList ===========
+      const results: MachineHealth[] = [];
 
-          // Calculate total production for sample size
-          const totalProduction = machineLots.reduce((sum, lot) => sum + lot.lot_size, 0);
-          const analyzedSamples = machineLots.reduce((sum, lot) => sum + lot.ok_parts_produced, 0);
+      for(const mach of machData){
+        // filter
+        const mLots = lotsData?.filter(l => l.machine=== mach.id) || [];
+        const mStops= stopsData?.filter(s => s.machine=== mach.id) || [];
+        const mQual = qualData?.filter(q => q.machine=== mach.id) || [];
 
-          // Calculate MTBF and MTTR
-          let totalUptime = 0;
-          let totalRepairTime = 0;
-          let previousFailureEnd: Date | null = null;
-          const totalStops = machineStops.length;
+        // A) production
+        let totalLots=0, totalOk=0;
+        mLots.forEach(lot=>{
+          totalLots += (lot.lot_size||0);
+          totalOk   += (lot.ok_parts_produced||0);
+        });
 
-          const sortedStops = machineStops
-            .sort((a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime());
+        // B) unplanned downtime => sum stops if failure_type != 'AP'
+        let sumUnplannedMin=0;
+        for(const stp of mStops){
+          const ft= mapStopFailureType(stp.failure_type);
+          if(ft==='AP') continue; // skip planned
+          const sT= new Date(stp.start_time);
+          let eT= stp.end_time? new Date(stp.end_time): end;
+          if(eT> end) eT= end;
+          const durMin= differenceInMinutes(eT,sT);
+          sumUnplannedMin+= durMin;
+        }
+        const totalDowntimeH= sumUnplannedMin/60;
 
-          sortedStops.forEach(stop => {
-            const start = new Date(stop.start_time);
-            const end = stop.end_time ? new Date(stop.end_time) : new Date();
-            
-            if (previousFailureEnd) {
-              totalUptime += differenceInHours(start, previousFailureEnd);
-            }
-            
-            const repairTime = differenceInHours(end, start);
-            totalRepairTime += repairTime;
-            previousFailureEnd = end;
-          });
+        // C) stops => MTBF, MTTR
+        let sumStopH=0;
+        const sortedStops= [...mStops].sort((a,b)=>
+          new Date(a.start_time).getTime() - new Date(b.start_time).getTime()
+        );
+        for(const stp of sortedStops){
+          const sT= new Date(stp.start_time);
+          let eT= stp.end_time? new Date(stp.end_time): end;
+          if(eT> end) eT= end;
+          const durH= differenceInMinutes(eT,sT)/60;
+          sumStopH+= durH;
+        }
+        const stopCount= sortedStops.length;
+        const totalDays= Math.max(0, differenceInDays(end, start));
+        const periodH= totalDays*24;
+        let uptimeH= Math.max(0, periodH- sumStopH);
+        let mtbf=0;
+        if(stopCount>0){
+          mtbf= uptimeH/stopCount;
+        } else {
+          mtbf= uptimeH; 
+        }
+        let mttr=0;
+        if(stopCount>0){
+          mttr= sumStopH/ stopCount;
+        }
 
-          const mtbf = totalStops > 1 ? totalUptime / (totalStops - 1) : totalUptime;
-          const mttr = totalStops > 0 ? totalRepairTime / totalStops : 0;
+        // D) recentStops => stops in last X days
+        const recentStart= subDays(end, days);
+        const recentStops= mStops.filter(s => new Date(s.start_time)>=recentStart).length;
 
-          // Calculate recent stops
-          const recentStops = machineStops
-            .filter(stop => new Date(stop.date) >= subDays(new Date(), 7))
-            .length;
+        // E) aggregator causes
+        interface CAgg {
+          type: string;
+          causeText: string;
+          occurrences: number;
+          totalDurH: number;
+          scrap: number;
+          rework: number;
+        }
+        const causeMap= new Map<string,CAgg>();
 
-          // Calculate total downtime
-          const totalDowntime = machineStops.reduce((sum, stop) => {
-            const start = new Date(stop.start_time);
-            const end = stop.end_time ? new Date(stop.end_time) : new Date();
-            return sum + differenceInHours(end, start);
-          }, 0);
+        // stops => type= mapStopFailureType => aggregator
+        for(const stp of mStops){
+          const ft= mapStopFailureType(stp.failure_type);
+          const cText= stp.cause||'(No cause)';
+          const key= ft+'|'+cText;
 
-          // Analyze failure patterns by type
-          const failuresByType = machineStops.reduce((acc, stop) => {
-            const type = stop.failure_type;
-            if (!acc[type]) {
-              acc[type] = { 
-                count: 0, 
-                totalDuration: 0,
-                affectedParts: 0,
-                totalParts: 0
-              };
-            }
-            
-            const duration = differenceInHours(
-              stop.end_time ? new Date(stop.end_time) : new Date(),
-              new Date(stop.start_time)
-            );
-            
-            // Find lots affected by this stop
-            const affectedLots = machineLots.filter(lot => {
-              const lotStart = new Date(lot.start_time);
-              const lotEnd = lot.end_time ? new Date(lot.end_time) : new Date();
-              const stopStart = new Date(stop.start_time);
-              const stopEnd = stop.end_time ? new Date(stop.end_time) : new Date();
-              return (
-                (stopStart >= lotStart && stopStart <= lotEnd) ||
-                (stopEnd >= lotStart && stopEnd <= lotEnd)
-              );
+          const sT= new Date(stp.start_time);
+          let eT= stp.end_time? new Date(stp.end_time): end;
+          if(eT> end) eT= end;
+          const durH= differenceInMinutes(eT,sT)/60;
+
+          if(!causeMap.has(key)){
+            causeMap.set(key,{
+              type: ft, causeText: cText, occurrences:0,
+              totalDurH:0, scrap:0, rework:0
             });
+          }
+          const cObj= causeMap.get(key)!;
+          cObj.occurrences++;
+          cObj.totalDurH += durH;
+        }
 
-            const affectedParts = affectedLots.reduce((sum, lot) => sum + lot.lot_size, 0);
-            
-            acc[type].count++;
-            acc[type].totalDuration += duration;
-            acc[type].affectedParts += affectedParts;
-            acc[type].totalParts = totalProduction;
-            return acc;
-          }, {} as Record<string, { 
-            count: number; 
-            totalDuration: number;
-            affectedParts: number;
-            totalParts: number;
-          }>);
+        // quality => aggregator
+        for(const qi of mQual){
+          const qType= mapQualityCategory(qi.category);
+          const cText= qi.cause||'(No cause)';
+          const key= qType+'|'+ cText;
 
-          // Process failures into common patterns
-          const commonFailures = Object.entries(failuresByType)
-            .map(([type, data]) => {
-              // Calculate projected affected parts with improved logic
-              const projectedAffected = calculateAffectedPartsEstimate(
-                data.affectedParts,
-                data.totalParts,
-                differenceInDays(endDate, startDate),
-                type
-              );
+          if(!causeMap.has(key)){
+            causeMap.set(key,{
+              type: qType, causeText: cText, occurrences:0,
+              totalDurH:0, scrap:0, rework:0
+            });
+          }
+          const cObj= causeMap.get(key)!;
+          cObj.occurrences++;
+          if(qType==='SCRAP'){
+            cObj.scrap += (qi.quantity||0);
+          } else if(qType==='REWORK'){
+            cObj.rework += (qi.quantity||0);
+          }
+        }
 
-              return {
-                type,
-                count: data.count,
-                avgDuration: data.totalDuration / data.count,
-                probability: totalStops > 0 ? (data.count / totalStops) * 100 : 0,
-                severity: data.count > 5 ? 'critical' : data.count > 3 ? 'high' : data.count > 1 ? 'medium' : 'low',
-                recommendedAction: type === 'PA' ? 'Schedule preventive maintenance' : 'Review quality control procedures',
-                estimatedImpact: data.totalDuration,
-                nextOccurrence: format(addDays(new Date(), Math.floor(Math.random() * 30)), 'yyyy-MM-dd'),
-                sampleData: {
-                  total: data.totalParts,
-                  affected: projectedAffected
-                }
-              };
-            })
-            .sort((a, b) => b.count - a.count);
+        // sum global scrap/rework
+        let sumScrap=0; 
+        let sumRework=0;
+        let totalOccurrences=0;
+        causeMap.forEach(c=> { totalOccurrences+= c.occurrences; });
 
-          // Calculate trend
-          const recentPeriod = machineStops.filter(stop => 
-            new Date(stop.date) >= subDays(endDate, 7)
-          ).length / 7;
-          
-          const previousPeriod = machineStops.filter(stop =>
-            new Date(stop.date) >= subDays(endDate, 14) &&
-            new Date(stop.date) < subDays(endDate, 7)
-          ).length / 7;
+        // build causeList
+        const causeList: FailureCause[]= [];
 
-          const trend = previousPeriod > 0 
-            ? ((recentPeriod - previousPeriod) / previousPeriod) * 100
+        causeMap.forEach(cObj=>{
+          const probability= totalOccurrences>0
+            ? (cObj.occurrences / totalOccurrences)*100
             : 0;
+          let severity=0;
+          if(cObj.type==='SCRAP' || cObj.type==='REWORK'){
+            severity= cObj.scrap*0.02 + cObj.rework*0.01;
+            sumScrap += cObj.scrap;
+            sumRework+= cObj.rework;
+          } else {
+            severity= cObj.totalDurH;
+          }
+          const riskScore= probability* severity;
 
-          // Calculate risk score
-          const riskScore = Math.min(100, Math.max(0,
-            (recentPeriod * 20) +
-            (mttr > 4 ? 30 : mttr * 7.5) +
-            (recentStops * 10) +
-            (totalDowntime > 100 ? 30 : totalDowntime * 0.3)
-          ));
+          // for nextOccurrence => random up to +10 days
+          // We'll parse "the earliest" at the end
+          const deltaDays= Math.floor(Math.random()*10)+1; 
+          const nextOccDate= addDays(new Date(), deltaDays);
 
-          return {
-            id: machine.id,
-            name: machine.name,
-            mtbf: parseFloat(mtbf.toFixed(2)),
-            mttr: parseFloat(mttr.toFixed(2)),
-            failureRate: recentPeriod,
+          causeList.push({
+            type: cObj.type,
+            causeText: cObj.causeText,
+            occurrences: cObj.occurrences,
+            totalDurationH: cObj.totalDurH,
+            scrapCount: cObj.scrap,
+            reworkCount: cObj.rework,
+            probability,
+            severity,
             riskScore,
-            nextPredictedFailure: format(addDays(new Date(), Math.floor(mtbf)), 'yyyy-MM-dd HH:mm'),
-            recentStops,
-            totalDowntime,
-            commonFailures,
-            trend,
-            sampleSize: {
-              total: totalProduction,
-              analyzed: analyzedSamples
-            }
-          };
-        })
-      );
+            nextOccurrence: format(nextOccDate,'yyyy-MM-dd')
+          });
+        });
+        causeList.sort((a,b)=> a.nextOccurrence.localeCompare(b.nextOccurrence)); 
+        // on tri par date la plus proche, puis par .riskScore ?
 
-      // Sort by risk score descending
-      healthData.sort((a, b) => b.riskScore - a.riskScore);
-      
-      setMachineHealth(healthData);
+        // filter causeList => expectedDateFilter
+        let finalCauseList= causeList;
+        if(expectedDateFilter!=='ALL'){
+          const dr= getExpectedDateRange(expectedDateFilter);
+          if(dr){
+            const {start: eStart, end: eEnd} = dr;
+            finalCauseList= causeList.filter(c=>{
+              // parse c.nextOccurrence
+              const cDate= new Date(c.nextOccurrence+'T00:00:00'); 
+              // keep if cDate in [eStart, eEnd]
+              return cDate>= eStart && cDate<= eEnd;
+            });
+          }
+        }
+
+        // filter causeList => category if needed 
+        // (on a déjà fait un 1er filter by eq(...) in stops, but let's re-check)
+        if(categoryFilter!=='ALL'){
+          finalCauseList = finalCauseList.filter(c=> c.type=== categoryFilter);
+        }
+
+        // si finalCauseList est vide => on skip entirely
+        if(finalCauseList.length===0){
+          // skip => no data
+          continue;
+        }
+
+        // unify nextFailureGlobal => la date la plus proche => finalCauseList[0]
+        // car on a trié par .nextOccurrence
+        const nextFail= finalCauseList[0].nextOccurrence+' 12:00';
+
+        // risk => max among finalCauseList
+        let topRisk=0;
+        finalCauseList.forEach(fc=>{
+          if(fc.riskScore> topRisk) topRisk= fc.riskScore;
+        });
+
+        const machineObj: MachineHealth={
+          id:mach.id,
+          name:mach.name,
+          totalDowntimeH,
+          mtbf,
+          mttr,
+          recentStops,
+          totalScrap: sumScrap,
+          totalRework: sumRework,
+          riskScore: parseFloat(topRisk.toFixed(1)),
+          causeList: finalCauseList,
+          sampleSize:{
+            totalLots,
+            totalOkParts: totalOk
+          },
+          nextFailureGlobal: nextFail
+        };
+
+        results.push(machineObj);
+      }
+
+      // sort descending by riskScore
+      results.sort((a,b)=> b.riskScore- a.riskScore);
+
+      setMachineList(results);
       setLoading(false);
 
-    } catch (err) {
-      console.error('Error analyzing machine health:', err);
-      setError(err instanceof Error ? err.message : 'Failed to analyze machine health');
+    } catch(err){
+      console.error('PredictiveInsights => fetchData ERROR:', err);
+      setError(err instanceof Error? err.message : 'Failed to load data');
       setLoading(false);
     }
-  };
+  }
 
-  const getFailureTypeDetails = (type: string) => {
-    switch (type) {
-      case 'PA':
-        return {
-          name: 'Equipment Breakdown',
-          icon: Tool,
-          color: 'text-red-600',
-          bgColor: 'bg-red-50',
-          causes: [
-            'Motor failure',
-            'Bearing wear',
-            'Hydraulic system failure',
-            'Electrical issues'
-          ],
-          actions: [
-            'Inspect bearings and lubrication',
-            'Check electrical connections',
-            'Verify hydraulic pressure',
-            'Monitor vibration levels'
-          ]
-        };
-      case 'NQ':
-        return {
-          name: 'Quality Issue',
-          icon: AlertTriangle,
-          color: 'text-yellow-600',
-          bgColor: 'bg-yellow-50',
-          causes: [
-            'Parameter drift',
-            'Tool wear',
-            'Material variation',
-            'Environmental factors'
-          ],
-          actions: [
-            'Calibrate equipment',
-            'Replace worn tools',
-            'Check material specifications',
-            'Monitor environmental conditions'
-          ]
-        };
-      default:
-        return {
-          name: 'Unknown',
-          icon: Activity,
-          color: 'text-gray-600',
-          bgColor: 'bg-gray-50',
-          causes: [],
-          actions: []
-        };
-    }
-  };
+  function showPerformanceCat(){
+    return (categoryFilter==='ALL' || isPerformanceCat(categoryFilter));
+  }
+  function showQualityCat(){
+    return (categoryFilter==='ALL' || isQualityCat(categoryFilter));
+  }
 
+  // Rendu
   return (
     <ProjectLayout>
       <div className="py-8 px-4 sm:px-6 lg:px-8">
-        <div className="flex items-center justify-between mb-6">
+        {/* Header */}
+        <div className="flex flex-col md:flex-row md:items-center md:justify-between mb-6 space-y-2 md:space-y-0">
           <div>
-            <h2 className="text-2xl font-bold text-gray-900">Predictive Maintenance</h2>
-            <p className="mt-1 text-sm text-gray-500">
-              Machine health analysis and failure predictions
+            <h2 className="text-2xl font-bold text-gray-900">Predictive Insights</h2>
+            <p className="text-sm text-gray-500 mt-1">
+              Advanced analysis from lots, stop_events, and quality_issues
             </p>
           </div>
           <div className="flex items-center space-x-3">
+            {/* timeRange */}
             <div className="relative">
               <button
-                onClick={() => setShowPeriodDropdown(!showPeriodDropdown)}
-                className="inline-flex items-center px-4 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
+                onClick={()=> setShowRangeDropdown(!showRangeDropdown)}
+                className="inline-flex items-center px-4 py-2 border border-gray-300 
+                  rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
               >
-                <Calendar className="h-4 w-4 mr-2" />
-                {selectedPeriod === '7d' ? 'Last 7 days' :
-                 selectedPeriod === '30d' ? 'Last 30 days' :
-                 'Last 90 days'}
-                <ChevronDown className="ml-2 h-4 w-4" />
+                <Calendar className="h-4 w-4 mr-2"/>
+                {timeRange==='7d'
+                  ? 'Last 7 days'
+                  : timeRange==='90d'
+                  ? 'Last 90 days'
+                  : 'Last 30 days'
+                }
+                <ChevronDown className="ml-2 h-4 w-4"/>
               </button>
-              {showPeriodDropdown && (
-                <div className="absolute right-0 mt-2 w-48 rounded-md shadow-lg bg-white ring-1 ring-black ring-opacity-5 z-10">
-                  <div className="py-1">
-                    {[
-                      { value: '7d', label: 'Last 7 days' },
-                      { value: '30d', label: 'Last 30 days' },
-                      { value: '90d', label: 'Last 90 days' }
-                    ].map((period) => (
-                      <button
-                        key={period.value}
-                        onClick={() => {
-                          setSelectedPeriod(period.value as TimeRangeType);
-                          setShowPeriodDropdown(false);
-                        }}
-                        className="block w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
-                      >
-                        {period.label}
-                      </button>
-                    ))}
-                  </div>
+              {showRangeDropdown && (
+                <div className="absolute right-0 mt-2 w-48 bg-white border border-gray-200 rounded-md shadow z-20">
+                  <button
+                    onClick={()=> {setTimeRange('7d'); setShowRangeDropdown(false);}}
+                    className="block w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                  >Last 7 days</button>
+                  <button
+                    onClick={()=> {setTimeRange('30d'); setShowRangeDropdown(false);}}
+                    className="block w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                  >Last 30 days</button>
+                  <button
+                    onClick={()=> {setTimeRange('90d'); setShowRangeDropdown(false);}}
+                    className="block w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                  >Last 90 days</button>
                 </div>
               )}
             </div>
             <button
-              className="inline-flex items-center px-4 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
+              onClick={()=> alert('Export not implemented')}
+              className="inline-flex items-center px-4 py-2 border border-transparent 
+                rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700"
             >
-              <Filter className="h-4 w-4 mr-2" />
-              Filters
-            </button>
-            <button
-              className="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700"
-            >
-              <Download className="h-4 w-4 mr-2" />
+              <Download className="h-4 w-4 mr-2"/>
               Export
             </button>
           </div>
         </div>
 
+        {/* Filters line 2 => machine + category + expected date */}
+        <div className="flex flex-col sm:flex-row sm:items-center space-y-2 sm:space-y-0 sm:space-x-4 mb-6">
+          {/* search machine */}
+          <div className="relative">
+            <Search className="absolute left-2 top-2 text-gray-400 h-4 w-4"/>
+            <input
+              type="text"
+              value={machineSearch}
+              onChange={(e)=> setMachineSearch(e.target.value)}
+              placeholder="Search machines..."
+              className="pl-8 pr-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-blue-500 focus:border-blue-500"
+            />
+          </div>
+
+          {/* category */}
+          <select
+            value={categoryFilter}
+            onChange={(e)=> setCategoryFilter(e.target.value as CategoryFilterType)}
+            className="border border-gray-300 text-sm rounded-md px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
+          >
+            <option value="ALL">All Categories</option>
+            <option value="PA">Failures (PA)</option>
+            <option value="NQ">Non-Quality (NQ)</option>
+            <option value="CS">Series Changes (CS)</option>
+            <option value="DO">Scheduled Deviation (DO)</option>
+            <option value="SCRAP">Scrap</option>
+            <option value="REWORK">Rework</option>
+          </select>
+
+          {/* expected date filter */}
+          <select
+            value={expectedDateFilter}
+            onChange={(e)=> setExpectedDateFilter(e.target.value as ExpectedDateFilter)}
+            className="border border-gray-300 text-sm rounded-md px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
+          >
+            <option value="ALL">All Next Occurrences</option>
+            <option value="TODAY">Today</option>
+            <option value="THIS_WEEK">This Week</option>
+            <option value="THIS_MONTH">This Month</option>
+            <option value="NEXT_MONTH">Next Month</option>
+            <option value="NEXT_6_MONTHS">Next 6 Months</option>
+            <option value="THIS_YEAR">This Year</option>
+          </select>
+        </div>
+
+        {/* Content */}
         {loading ? (
           <div className="flex justify-center items-center h-64">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"/>
           </div>
         ) : error ? (
           <div className="bg-red-50 p-4 rounded-md">
             <div className="flex">
-              <div className="ml-3">
-                <h3 className="text-sm font-medium text-red-800">Error analyzing machine health</h3>
-                <div className="mt-2 text-sm text-red-700">{error}</div>
+              <AlertTriangle className="h-5 w-5 text-red-500 mt-0.5 mr-2"/>
+              <div>
+                <h3 className="text-sm font-medium text-red-800">Error loading data</h3>
+                <p className="text-sm text-red-700 mt-1">{error}</p>
               </div>
             </div>
           </div>
+        ) : machineList.length===0 ? (
+          <div className="text-center py-12">
+            <p className="text-sm text-gray-500">No machines or data found for these filters.</p>
+          </div>
         ) : (
           <div className="space-y-6">
-            {machineHealth.map((machine) => {
+            {machineList.map(mach => {
+              // Show performance or quality lines?
+              const showPerf = (categoryFilter==='ALL' || isPerformanceCat(categoryFilter));
+              const showQual = (categoryFilter==='ALL' || isQualityCat(categoryFilter));
+
+              // We'll label "Downtime (Unplanned)" consistently
+              const downtimeLabel= "Downtime (Unplanned)";
+              // "Stops (Last X days)"
+              let days=7;
+              if(timeRange==='30d') days=30; else if(timeRange==='90d') days=90;
+              const stopsLabel= `Stops (Last ${days} days)`;
+
+              const riskBadge= getRiskColor(mach.riskScore);
+
               return (
-                <div key={machine.id} className="bg-white shadow rounded-lg overflow-hidden">
-                  <div className="p-6">
-                    <div className="flex items-center justify-between mb-6">
-                      <div>
-                        <h3 className="text-xl font-medium text-gray-900">{machine.name}</h3>
-                        <div className="mt-1 flex items-center space-x-3">
-                          <span className={`inline-flex items-center px-3 py-1 rounded-full text-sm font-medium ${
-                            machine.riskScore >= 75 ? 'bg-red-100 text-red-800' :
-                            machine.riskScore >= 50 ? 'bg-orange-100 text-orange-800' :
-                            machine.riskScore >= 25 ? 'bg-yellow-100 text-yellow-800' :
-                            'bg-green-100 text-green-800'
-                          }`}>
-                            Risk Score: {machine.riskScore.toFixed(0)}
-                          </span>
-                          <span className={`flex items-center ${machine.trend >= 0 ? 'text-red-600' : 'text-green-600'}`}>
-                            {machine.trend >= 0 ? <ArrowUp className="h-4 w-4" /> : <ArrowDown className="h-4 w-4" />}
-                            <span className="ml-1">{Math.abs(machine.trend).toFixed(1)}%</span>
-                          </span>
-                          <span className="text-sm text-gray-500">
-                            Sample: {machine.sampleSize.analyzed}/{machine.sampleSize.total} parts analyzed
-                          </span>
-                        </div>
-                      </div>
-                      <div className="text-right">
-                        <div className="text-sm text-gray-500">Next Predicted Failure</div>
-                        <div className="mt-1 text-lg font-semibold text-blue-600">
-                          {format(new Date(machine.nextPredictedFailure), 'MMM d, HH:mm')}
-                        </div>
+                <div key={mach.id} className="bg-white shadow rounded-lg p-6">
+                  {/* Header */}
+                  <div className="flex items-center justify-between mb-6">
+                    <div>
+                      <h3 className="text-xl font-semibold text-gray-900">{mach.name}</h3>
+                      <p className="mt-1 text-sm text-gray-500">
+                        Sample: {mach.sampleSize.totalOkParts}/{mach.sampleSize.totalLots}
+                      </p>
+                    </div>
+                    <div className="text-right">
+                      <div className="text-xs text-gray-500">Next Failure (approx.)</div>
+                      <div className="mt-1 text-lg font-semibold text-blue-600">
+                        {mach.nextFailureGlobal}
                       </div>
                     </div>
+                  </div>
 
-                    {/* Machine Metrics */}
+                  {/* Performance KPI line */}
+                  {showPerf && (
                     <div className="grid grid-cols-4 gap-4 mb-6">
-                      <div className="bg-gray-50 p-4 rounded-lg">
-                        <div className="text-sm font-medium text-gray-500">MTBF</div>
-                        <div className="mt-1 text-lg font-semibold text-gray-900">
-                          {formatDuration(machine.mtbf)}
+                      <div className="bg-gray-50 p-4 rounded text-center">
+                        <div className="text-xs text-gray-500">{downtimeLabel}</div>
+                        <div className="mt-1 text-base font-semibold text-gray-900">
+                          {formatDuration(mach.totalDowntimeH)}
                         </div>
                       </div>
-                      <div className="bg-gray-50 p-4 rounded-lg">
-                        <div className="text-sm font-medium text-gray-500">MTTR</div>
-                        <div className="mt-1 text-lg font-semibold text-gray-900">
-                          {formatDuration(machine.mttr)}
+                      <div className="bg-gray-50 p-4 rounded text-center">
+                        <div className="text-xs text-gray-500">MTBF</div>
+                        <div className="mt-1 text-base font-semibold text-gray-900">
+                          {formatDuration(mach.mtbf)}
                         </div>
                       </div>
-                      <div className="bg-gray-50 p-4 rounded-lg">
-                        <div className="text-sm font-medium text-gray-500">Total Downtime</div>
-                        <div className="mt-1 text-lg font-semibold text-gray-900">
-                          {formatDuration(machine.totalDowntime)}
+                      <div className="bg-gray-50 p-4 rounded text-center">
+                        <div className="text-xs text-gray-500">MTTR</div>
+                        <div className="mt-1 text-base font-semibold text-gray-900">
+                          {formatDuration(mach.mttr)}
                         </div>
                       </div>
-                      <div className="bg-gray-50 p-4 rounded-lg">
-                        <div className="text-sm font-medium text-gray-500">Recent Stops</div>
-                        <div className="mt-1 text-lg font-semibold text-gray-900">
-                          {machine.recentStops}
+                      <div className="bg-gray-50 p-4 rounded text-center">
+                        <div className="text-xs text-gray-500">{stopsLabel}</div>
+                        <div className="mt-1 text-base font-semibold text-gray-900">
+                          {mach.recentStops}
                         </div>
                       </div>
                     </div>
+                  )}
 
-                    {/* Common Failures Section */}
-                    <div className="space-y-4">
-                      {machine.commonFailures
-                        .filter(failure => ['PA', 'NQ'].includes(failure.type))
-                        .map((failure, index) => {
-                          const details = getFailureTypeDetails(failure.type);
-                          const Icon = details.icon;
-                          return (
-                            <div key={index} className={`${details.bgColor} rounded-lg p-6`}>
-                              <div className="flex items-center justify-between mb-4">
-                                <div className="flex items-center">
-                                  <div className={`p-2 rounded-lg ${details.bgColor}`}>
-                                    <Icon className={`h-6 w-6 ${details.color}`} />
-                                  </div>
-                                  <div className="ml-3">
-                                    <h4 className="text-lg font-medium text-gray-900">{details.name}</h4>
-                                    <div className="mt-1 flex items-center space-x-3 text-sm">
-                                      <span className="text-gray-500">
-                                        Sample: {failure.sampleData.affected}/{failure.sampleData.total} parts affected
-                                      </span>
-                                      <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                                        failure.severity === 'critical' ? 'bg-red-100 text-red-800' :
-                                        failure.severity === 'high' ? 'bg-orange-100 text-orange-800' :
-                                        failure.severity === 'medium' ? 'bg-yellow-100 text-yellow-800' :
-                                        'bg-green-100 text-green-800'
-                                      }`}>
-                                        {failure.probability.toFixed(1)}% probability
-                                      </span>
-                                    </div>
-                                  </div>
-                                </div>
-                                <div className="text-right">
-                                  <div className="text-sm text-gray-500">Next Expected</div>
-                                  <div className="mt-1 font-medium text-gray-900">
-                                    {format(new Date(failure.nextOccurrence), 'MMM d')}
-                                  </div>
-                                </div>
-                              </div>
+                  {/* Quality KPI line */}
+                  {showQual && (
+                    <div className="grid grid-cols-2 gap-4 mb-6">
+                      <div className="bg-gray-50 p-4 rounded text-center">
+                        <div className="text-xs text-gray-500">Scrap</div>
+                        <div className="mt-1 text-base font-semibold text-red-700">
+                          {mach.totalScrap.toLocaleString()}
+                        </div>
+                      </div>
+                      <div className="bg-gray-50 p-4 rounded text-center">
+                        <div className="text-xs text-gray-500">Rework</div>
+                        <div className="mt-1 text-base font-semibold text-purple-700">
+                          {mach.totalRework.toLocaleString()}
+                        </div>
+                      </div>
+                    </div>
+                  )}
 
-                              <div className="grid grid-cols-2 gap-6">
-                                <div>
-                                  <h5 className="text-sm font-medium text-gray-900 mb-2">Historical Data</h5>
-                                  <div className="grid grid-cols-2 gap-4 text-sm">
-                                    <div className="bg-white bg-opacity-50 rounded p-3">
-                                      <div className="text-gray-500">Occurrences</div>
-                                      <div className="mt-1 font-medium text-gray-900">{failure.count}x</div>
-                                    </div>
-                                    <div className="bg-white bg-opacity-50 rounded p-3">
-                                      <div className="text-gray-500">Avg Duration</div>
-                                      <div className="mt-1 font-medium text-gray-900">{formatDuration(failure.avgDuration)}</div>
-                                    </div>
-                                    <div className="bg-white bg-opacity-50 rounded p-3">
-                                      <div className="text-gray-500">Total Impact</div>
-                                      <div className="mt-1 font-medium text-gray-900">{formatDuration(failure.estimatedImpact)}</div>
-                                    </div>
-                                    <div className="bg-white bg-opacity-50 rounded p-3">
-                                      <div className="text-gray-500">Affected Rate</div>
-                                      <div className="mt-1 font-medium text-gray-900">
-                                        {((failure.sampleData.affected / failure.sampleData.total) * 100).toFixed(1)}%
-                                      </div>
-                                    </div>
-                                  </div>
-                                </div>
+                  {/* Risk badge */}
+                  <div className="mb-4">
+                    <span
+                      className={`inline-flex items-center px-3 py-1 rounded-full text-sm font-medium ${riskBadge}`}
+                    >
+                      Risk: {mach.riskScore.toFixed(1)}
+                    </span>
+                  </div>
 
-                                <div className="space-y-4">
-                                  <div>
-                                    <h5 className="text-sm font-medium text-gray-900 mb-2">Probable Causes</h5>
-                                    <ul className="space-y-1">
-                                      {details.causes.map((cause, i) => (
-                                        <li key={i} className="flex items-center text-sm text-gray-600">
-                                          <div className="w-1 h-1 rounded-full bg-gray-400 mr-2"></div>
-                                          {cause}
-                                        </li>
-                                      ))}
-                                    </ul>
-                                  </div>
-                                  <div>
-                                    <h5 className="text-sm font-medium text-gray-900 mb-2">Recommended Actions</h5>
-                                    <ul className="space-y-1">
-                                      {details.actions.map((action, i) => (
-                                        <li key={i} className="flex items-center text-sm text-gray-600">
-                                          <CheckCircle className="h-4 w-4 text-green-500 mr-2" />
-                                          {action}
-                                        </li>
-                                      ))}
-                                    </ul>
-                                  </div>
-                                </div>
+                  {/* cause list */}
+                  <div className="space-y-4">
+                    {mach.causeList.map((cause, idx)=>{
+                      const cBadge= getRiskColor(cause.riskScore);
+
+                      return (
+                        <div key={`${cause.type}_${idx}`} className="bg-gray-50 p-4 rounded-lg border border-gray-100">
+                          <div className="flex items-center justify-between mb-2">
+                            <div className="flex items-center">
+                              {getCategoryIcon(cause.type)}
+                              <div>
+                                <h4 className="text-sm font-medium text-gray-900">{cause.causeText}</h4>
+                                <p className="text-xs text-gray-500 mt-0.5">(Type: {cause.type})</p>
                               </div>
                             </div>
-                          );
-                        })}
-                    </div>
+                            <span
+                              className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${cBadge}`}
+                            >
+                              Risk: {cause.riskScore.toFixed(1)}
+                            </span>
+                          </div>
+
+                          <div className="text-xs text-gray-500">
+                            Probability: {cause.probability.toFixed(1)}% — Severity: {cause.severity.toFixed(1)}
+                          </div>
+
+                          <div className="grid grid-cols-3 gap-4 text-sm mt-2">
+                            <div>
+                              <div className="text-gray-500">Occurrences</div>
+                              <div className="text-gray-900">{cause.occurrences}</div>
+                            </div>
+                            {cause.type==='SCRAP' || cause.type==='REWORK' ? (
+                              <>
+                                <div>
+                                  <div className="text-gray-500">{cause.type} (count)</div>
+                                  <div className="text-gray-900">
+                                    {cause.type==='SCRAP'? cause.scrapCount : cause.reworkCount}
+                                  </div>
+                                </div>
+                                <div>
+                                  <div className="text-gray-500">{cause.type} %</div>
+                                  <div className="text-gray-900">
+                                    {mach.sampleSize.totalOkParts>0
+                                      ? (
+                                          (cause.type==='SCRAP'? cause.scrapCount : cause.reworkCount)
+                                          / mach.sampleSize.totalOkParts * 100
+                                        ).toFixed(2) + '%'
+                                      : '0%'
+                                    }
+                                  </div>
+                                </div>
+                              </>
+                            ) : (
+                              <>
+                                {/* Duration (h) */}
+                                <div>
+                                  <div className="text-gray-500">Duration (h)</div>
+                                  <div className="text-gray-900">
+                                    {cause.totalDurationH.toFixed(2)}
+                                  </div>
+                                </div>
+                                {/* Scrap/Rework if >0 */}
+                                {(cause.scrapCount>0 || cause.reworkCount>0) ? (
+                                  <div>
+                                    <div className="text-gray-500">Scrap/Rework</div>
+                                    <div className="text-gray-900">
+                                      {cause.scrapCount}/{cause.reworkCount}
+                                    </div>
+                                  </div>
+                                ) : (
+                                  <div>
+                                    <div className="text-gray-500">Scrap/Rework</div>
+                                    <div className="text-gray-900">-</div>
+                                  </div>
+                                )}
+                              </>
+                            )}
+                          </div>
+
+                          <div className="text-xs text-gray-500 mt-2 italic">
+                            Next occurrence ~ {cause.nextOccurrence}
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
               );
@@ -636,4 +850,4 @@ const PredictiveMaintenance: React.FC = () => {
   );
 };
 
-export default PredictiveMaintenance;
+export default PredictiveInsights;
