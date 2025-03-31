@@ -8,7 +8,6 @@ import {
   format,
   subDays,
   differenceInMinutes,
-  differenceInDays,
   addDays,
   startOfToday,
   endOfToday,
@@ -20,9 +19,7 @@ import {
   endOfYear
 } from 'date-fns';
 import {
-  Calendar,
   Download,
-  ChevronDown,
   AlertTriangle,
   Clock,
   PenTool as Tool,
@@ -35,14 +32,12 @@ import ProjectLayout from '../../../components/layout/ProjectLayout';
 import { supabase } from '../../../lib/supabase';
 
 // --------------------- Tooltip Component ---------------------
-// Simple composant pour afficher un tooltip au survol
 const Tooltip: React.FC<{ content: string; className?: string }> = ({
   content,
   className = '',
   children
 }) => {
   const [hovered, setHovered] = useState(false);
-
   return (
     <div
       className={`relative inline-block ${className}`}
@@ -60,6 +55,16 @@ const Tooltip: React.FC<{ content: string; className?: string }> = ({
 };
 
 // --------------------- Utility Functions ---------------------
+function quantile(arr: number[], q: number): number {
+  const pos = (arr.length - 1) * q;
+  const base = Math.floor(pos);
+  const rest = pos - base;
+  if (arr[base + 1] !== undefined) {
+    return arr[base] + rest * (arr[base + 1] - arr[base]);
+  } else {
+    return arr[base];
+  }
+}
 
 function calculateWeibullFromTimestamps(timestamps: Date[]): { shape: number; scale: number } {
   if (timestamps.length < 2) return { shape: 1, scale: 0 };
@@ -75,12 +80,10 @@ function calculateWeibullFromTimestamps(timestamps: Date[]): { shape: number; sc
 }
 
 function weibullMedian(shape: number, scale: number): number {
-  return scale * Math.pow(Math.log(2), 1 / shape);
+  return shape > 0 ? scale * Math.pow(Math.log(2), 1 / shape) : 0;
 }
 
 // --------------------- Types & Interfaces ---------------------
-
-type TimeRangeType = '7d' | '30d' | '90d';
 type CategoryFilterType = 'ALL' | 'PA' | 'NQ' | 'CS' | 'DO' | 'SCRAP' | 'REWORK';
 type ExpectedDateFilter =
   | 'ALL'
@@ -100,13 +103,14 @@ interface FailureCause {
   reworkCount: number;
   lastOccurrence: string;
   avgDuration: number;
-  stdDeviation: number;
   variabilityIndex: number;
+  IQR: number;
   occurrencePerWeek: number;
   severityValue: number;
   predictedRiskScore: number;
   certainty: string;
   expectedDate: string;
+  trend: string;
   weibullParams: { shape: number; scale: number };
 }
 
@@ -126,16 +130,29 @@ interface MachineHealth {
   nextFailureGlobal: string;
 }
 
+interface CAgg {
+  type: string;
+  causeText: string;
+  occurrences: number;
+  totalDurH: number;
+  sumSqDurH: number;
+  scrap: number;
+  rework: number;
+  lastOccurrence: Date | null;
+  weightedOccurrences: number;
+  weightedTotalDurH: number;
+  weightedSumSqDurH: number;
+  weightedQuantitySum?: number;
+  weightedQuantitySumSq?: number;
+  occurrenceTimestamps: Date[];
+  durations?: number[]; // For stops: hours; for SCRAP/REWORK: pieces
+}
+
 // --------------------- Constants & Parameters ---------------------
-
-const TAU_MS = 30 * 24 * 60 * 60 * 1000; // 30 days in ms
-
-// Risk factors for Scrap/Rework (modifiable via popup)
-const INITIAL_RISK_FACTOR_SCRAP = 7.5; // exemple: 1–15
-const INITIAL_RISK_FACTOR_REWORK = 2.5; // exemple: 1–5
+const INITIAL_RISK_FACTOR_SCRAP = 7.5;
+const INITIAL_RISK_FACTOR_REWORK = 2.5;
 
 // --------------------- Icons & Colors ---------------------
-
 const FAILURE_TYPES = [
   { type: 'AP', name: 'Planned Downtime', icon: Clock, color: '#2563eb' },
   { type: 'PA', name: 'Equipment Breakdown', icon: Tool, color: '#dc2626' },
@@ -155,24 +172,18 @@ function getCategoryIcon(type: string) {
 }
 
 // --------------------- Risk / Formatting Functions ---------------------
-
 function getRiskColor(score: number): string {
-  if (score >= 100) {
-    return 'bg-red-100 text-red-800';
-  } else if (score >= 50) {
-    return 'bg-orange-100 text-orange-800';
-  } else if (score >= 25) {
-    return 'bg-yellow-100 text-yellow-800';
-  } else if (score >= 10) {
-    return 'bg-blue-100 text-blue-800';
-  } else if (score >= 2.5) {
-    return 'bg-teal-100 text-teal-800';
-  } else {
-    return 'bg-green-100 text-green-800';
-  }
+  if (isNaN(score)) return 'bg-gray-100 text-gray-800';
+  if (score >= 100) return 'bg-red-100 text-red-800';
+  if (score >= 50) return 'bg-orange-100 text-orange-800';
+  if (score >= 25) return 'bg-yellow-100 text-yellow-800';
+  if (score >= 10) return 'bg-blue-100 text-blue-800';
+  if (score >= 2.5) return 'bg-teal-100 text-teal-800';
+  return 'bg-green-100 text-green-800';
 }
 
 function classifyRisk(score: number): string {
+  if (isNaN(score)) return 'Undefined';
   if (score >= 100) return 'Critical';
   if (score >= 50) return 'Severe';
   if (score >= 25) return 'High';
@@ -188,19 +199,6 @@ function formatDuration(h: number): string {
 }
 
 // --------------------- Date Range Helpers ---------------------
-
-function getDateRange(range: TimeRangeType) {
-  const now = new Date();
-  switch (range) {
-    case '7d':
-      return { start: subDays(now, 7), end: now, days: 7 };
-    case '90d':
-      return { start: subDays(now, 90), end: now, days: 90 };
-    default:
-      return { start: subDays(now, 30), end: now, days: 30 };
-  }
-}
-
 function getExpectedDateRange(edf: ExpectedDateFilter) {
   const now = new Date();
   switch (edf) {
@@ -224,7 +222,6 @@ function getExpectedDateRange(edf: ExpectedDateFilter) {
 }
 
 // --------------------- Mappers for Types ---------------------
-
 function mapStopFailureType(ft: string | null | undefined) {
   const s = (ft || '').toLowerCase();
   switch (s) {
@@ -246,27 +243,50 @@ function mapQualityCategory(cat: string | null | undefined) {
 }
 
 // --------------------- CauseCard Component ---------------------
-
 interface CauseCardProps {
   cause: FailureCause;
+  riskFactorScrap: number;
+  riskFactorRework: number;
+  categoryFilter: CategoryFilterType;
 }
 
-const CauseCard: React.FC<CauseCardProps> = ({ cause }) => {
-  const riskBadgeClass = getRiskColor(cause.predictedRiskScore);
-  const causeRiskClass = classifyRisk(cause.predictedRiskScore);
+const CauseCard: React.FC<CauseCardProps> = ({ cause, riskFactorScrap, riskFactorRework }) => {
+  // Risk
+  let riskScoreDisplay = cause.predictedRiskScore;
+  if (riskScoreDisplay === 0) {
+    riskScoreDisplay = NaN;
+  }
+  if (
+    (cause.type === 'SCRAP' && riskFactorScrap === 0) ||
+    (cause.type === 'REWORK' && riskFactorRework === 0)
+  ) {
+    riskScoreDisplay = NaN;
+  }
+  const displayedRisk = isNaN(riskScoreDisplay) ? 'N/A' : riskScoreDisplay.toFixed(2);
+  const riskBadgeClass = getRiskColor(riskScoreDisplay);
+  const causeRiskClass = classifyRisk(riskScoreDisplay);
 
-  // Texte pour le tooltip sur Weibull
+  // IQR
+  const displayedIQR = isNaN(cause.IQR) ? 'N/A' : cause.IQR.toFixed(2);
+  // Average Duration or Affected Pieces
+  const displayedAvgDuration = isNaN(cause.avgDuration) ? 'N/A' : cause.avgDuration.toFixed(2);
+  // Severity
+  const displayedSeverity = isNaN(cause.severityValue) ? 'N/A' : cause.severityValue.toFixed(2);
+
+  // Weibull shape & scale
+  const shapeVal = cause.weibullParams.shape;
+  const scaleVal = cause.weibullParams.scale;
+  const shapeDisplay = shapeVal === 0 || isNaN(shapeVal) ? 'N/A' : shapeVal.toFixed(2);
+  const scaleDisplay = scaleVal === 0 || isNaN(scaleVal) ? 'N/A' : scaleVal.toFixed(2);
+
   const weibullTooltipText = `
 Weibull Distribution:
 - Shape > 1: Failure rate increases over time
 - Shape < 1: Failure rate decreases over time
 - Shape = 1: Failure rate is constant (exponential)
-
-- Scale: Represents the average interval (in days) between failures. 
-  The median is scale × (ln2)^(1/shape).
-
-These parameters help predict the next failure based on historical intervals.
-  `;
+- Scale: Average interval (in days) between failures.
+- Median = scale × (ln(2))^(1/shape)
+`;
 
   return (
     <div className="bg-white shadow-sm rounded-lg p-4 border border-gray-100 hover:shadow-md transition">
@@ -281,12 +301,11 @@ These parameters help predict the next failure based on historical intervals.
             <p className="text-xs text-gray-500">Type: {cause.type}</p>
           </div>
         </div>
-        <div
-          className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${riskBadgeClass}`}
-        >
-          Risk: {cause.predictedRiskScore.toFixed(2)} ({causeRiskClass})
+        <div className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${riskBadgeClass}`}>
+          Risk: {displayedRisk} ({causeRiskClass})
         </div>
       </div>
+
       {/* Historical Analysis & Prediction */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
         {/* Historical Analysis */}
@@ -301,15 +320,15 @@ These parameters help predict the next failure based on historical intervals.
               <>
                 <div className="flex justify-between">
                   <span className="text-gray-500">Average Duration (hrs)</span>
-                  <span className="font-semibold text-gray-800">
-                    {cause.avgDuration.toFixed(2)}h
-                  </span>
+                  <span className="font-semibold text-gray-800">{displayedAvgDuration}h</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-gray-500">Duration Variation (hrs)</span>
-                  <span className="font-semibold text-gray-800">
-                    {cause.stdDeviation.toFixed(2)}h
-                  </span>
+                  <span className="text-gray-500">IQR (hrs)</span>
+                  <span className="font-semibold text-gray-800">{displayedIQR}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-500">Trend (vs. previous period)</span>
+                  <span className="font-semibold text-gray-800">{cause.trend}</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-gray-500">Last Occurrence</span>
@@ -320,15 +339,15 @@ These parameters help predict the next failure based on historical intervals.
               <>
                 <div className="flex justify-between">
                   <span className="text-gray-500">Average Affected Pieces</span>
-                  <span className="font-semibold text-gray-800">
-                    {cause.avgDuration.toFixed(2)}
-                  </span>
+                  <span className="font-semibold text-gray-800">{displayedAvgDuration}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-gray-500">Variation (Pieces)</span>
-                  <span className="font-semibold text-gray-800">
-                    {cause.stdDeviation.toFixed(2)}
-                  </span>
+                  <span className="text-gray-500">IQR (Pieces)</span>
+                  <span className="font-semibold text-gray-800">{displayedIQR}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-500">Trend (vs. previous period)</span>
+                  <span className="font-semibold text-gray-800">{cause.trend}</span>
                 </div>
                 {cause.type === 'SCRAP' && (
                   <div className="flex justify-between">
@@ -356,9 +375,7 @@ These parameters help predict the next failure based on historical intervals.
           <div className="flex flex-col space-y-2">
             <div className="flex justify-between">
               <span className="text-gray-500">Predicted Occurrences/Week</span>
-              <span className="font-semibold text-gray-800">
-                {cause.occurrencePerWeek.toFixed(2)}
-              </span>
+              <span className="font-semibold text-gray-800">{cause.occurrencePerWeek.toFixed(2)}</span>
             </div>
             <div className="flex justify-between">
               <span className="text-gray-500">
@@ -366,9 +383,7 @@ These parameters help predict the next failure based on historical intervals.
                   ? 'Affected Parts (est.)'
                   : 'Severity (Time Impact)'}
               </span>
-              <span className="font-semibold text-gray-800">
-                {cause.severityValue.toFixed(2)}
-              </span>
+              <span className="font-semibold text-gray-800">{displayedSeverity}</span>
             </div>
             <div className="flex justify-between">
               <span className="text-gray-500">Confidence</span>
@@ -386,7 +401,7 @@ These parameters help predict the next failure based on historical intervals.
                 </Tooltip>
               </span>
               <span className="font-semibold text-gray-800">
-                shape: {cause.weibullParams.shape.toFixed(2)}, scale: {cause.weibullParams.scale.toFixed(2)}
+                shape: {shapeDisplay}, scale: {scaleDisplay}
               </span>
             </div>
           </div>
@@ -397,69 +412,102 @@ These parameters help predict the next failure based on historical intervals.
 };
 
 // --------------------- RiskParametersModal Component ---------------------
-
 interface RiskParametersModalProps {
   riskFactorScrap: number;
   riskFactorRework: number;
+  riskPeriod: number;
   setRiskFactorScrap: (value: number) => void;
   setRiskFactorRework: (value: number) => void;
+  setRiskPeriod: (value: number) => void;
   onClose: () => void;
 }
 
 const RiskParametersModal: React.FC<RiskParametersModalProps> = ({
   riskFactorScrap,
   riskFactorRework,
+  riskPeriod,
   setRiskFactorScrap,
   setRiskFactorRework,
+  setRiskPeriod,
   onClose
 }) => {
+  // Local state so changes are applied only when "Apply" is clicked
+  const [localRiskPeriod, setLocalRiskPeriod] = useState<number>(riskPeriod);
+  const [localRiskFactorScrap, setLocalRiskFactorScrap] = useState<number>(riskFactorScrap);
+  const [localRiskFactorRework, setLocalRiskFactorRework] = useState<number>(riskFactorRework);
+
+  const applyChanges = () => {
+    setRiskPeriod(localRiskPeriod);
+    setRiskFactorScrap(localRiskFactorScrap);
+    setRiskFactorRework(localRiskFactorRework);
+    onClose();
+  };
+
   return (
     <div className="fixed inset-0 z-30 flex items-center justify-center">
       <div className="absolute inset-0 bg-black opacity-50" onClick={onClose} />
       <div className="bg-white rounded-lg shadow-lg z-40 w-80 p-6">
         <h3 className="text-lg font-semibold mb-4">Risk Parameters</h3>
         <div className="space-y-4">
+          {/* Risk Period */}
+          <div>
+            <label className="block text-sm text-gray-700">Risk Period (days)</label>
+            <select
+              value={localRiskPeriod}
+              onChange={(e) => setLocalRiskPeriod(parseInt(e.target.value, 10))}
+              className="w-full border border-gray-300 rounded-md px-2 py-1 text-sm"
+            >
+              <option value={7}>7</option>
+              <option value={30}>30</option>
+              <option value={90}>90</option>
+            </select>
+            <p className="text-xs text-gray-500 mt-1">
+              Data History: Defines the number of past days included in the analysis and affects the exponential weighting.
+            </p>
+          </div>
+
+          {/* Scrap Risk Factor */}
           <div>
             <label className="block text-sm text-gray-700">Scrap Risk Factor</label>
             <input
               type="number"
-              min={1}
+              min={0}
               max={15}
               step={0.1}
-              value={riskFactorScrap}
-              onChange={(e) => setRiskFactorScrap(parseFloat(e.target.value))}
+              value={localRiskFactorScrap}
+              onChange={(e) => setLocalRiskFactorScrap(parseFloat(e.target.value))}
               className="w-full border border-gray-300 rounded-md px-2 py-1 text-sm"
-              title="Risk factor for Scrap (1–15)."
+              title="Risk factor for Scrap (0–15)."
             />
             <p className="text-xs text-gray-500 mt-1">
-              Determines the impact of the scrap rate on the overall risk score.
-              Typical values range between 1 and 15.
+              Determines how strongly scrap events affect the overall risk score. A higher value may simulate up to 10× more lost production time, reflecting increased downtime and higher operational costs.
             </p>
           </div>
+
+          {/* Rework Risk Factor */}
           <div>
             <label className="block text-sm text-gray-700">Rework Risk Factor</label>
             <input
               type="number"
-              min={1}
+              min={0}
               max={5}
               step={0.1}
-              value={riskFactorRework}
-              onChange={(e) => setRiskFactorRework(parseFloat(e.target.value))}
+              value={localRiskFactorRework}
+              onChange={(e) => setLocalRiskFactorRework(parseFloat(e.target.value))}
               className="w-full border border-gray-300 rounded-md px-2 py-1 text-sm"
-              title="Risk factor for Rework (1–5)."
+              title="Risk factor for Rework (0–5)."
             />
             <p className="text-xs text-gray-500 mt-1">
-              Adjusts the influence of rework events in the risk score calculation.
-              Typical values range between 1 and 5.
+              Determines how strongly rework events affect the overall risk score. A higher value increases the influence of rework events on downtime and productivity.
             </p>
           </div>
         </div>
         <div className="mt-6 flex justify-end">
           <button
-            onClick={onClose}
+            onClick={applyChanges}
             className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
           >
-            Close
+            Apply
           </button>
         </div>
       </div>
@@ -467,14 +515,23 @@ const RiskParametersModal: React.FC<RiskParametersModalProps> = ({
   );
 };
 
-// --------------------- Main Component: PredictiveInsights ---------------------
+// --------------------- Export Function ---------------------
+const handleExportJson = (data: MachineHealth[]) => {
+  const dataStr = JSON.stringify(data, null, 2);
+  const blob = new Blob([dataStr], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'export.json';
+  a.click();
+  URL.revokeObjectURL(url);
+};
 
+// --------------------- Main Component: PredictiveInsights ---------------------
 const PredictiveInsights: React.FC = () => {
   const { projectId } = useParams<{ projectId: string }>();
 
   // Filter states
-  const [timeRange, setTimeRange] = useState<TimeRangeType>('30d');
-  const [showRangeDropdown, setShowRangeDropdown] = useState(false);
   const [categoryFilter, setCategoryFilter] = useState<CategoryFilterType>('ALL');
   const [expectedDateFilter, setExpectedDateFilter] = useState<ExpectedDateFilter>('ALL');
   const [machineSearch, setMachineSearch] = useState('');
@@ -482,42 +539,45 @@ const PredictiveInsights: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [machineList, setMachineList] = useState<MachineHealth[]>([]);
 
-  // Pagination state for machines
+  // Pagination
   const [machinePage, setMachinePage] = useState<number>(1);
-
-  // State for limitation of causes displayed per machine.
-  // Options: Top 3, 5, 10 or ALL
+  // Cause limit
   const [causeLimit, setCauseLimit] = useState<number | 'ALL'>(3);
 
-  // Risk factors for Scrap/Rework
+  // Risk factors & period
   const [riskFactorScrap, setRiskFactorScrap] = useState<number>(INITIAL_RISK_FACTOR_SCRAP);
   const [riskFactorRework, setRiskFactorRework] = useState<number>(INITIAL_RISK_FACTOR_REWORK);
-
-  // State for showing the Risk Parameters modal
+  const [riskPeriod, setRiskPeriod] = useState<number>(30); // default: 30 days
+  // Risk Parameters modal
   const [showRiskModal, setShowRiskModal] = useState<boolean>(false);
 
   useEffect(() => {
     if (projectId) {
       fetchData();
     }
-    // Réinitialiser la pagination à chaque changement de filtre
     setMachinePage(1);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     projectId,
-    timeRange,
     categoryFilter,
     expectedDateFilter,
     machineSearch,
     riskFactorScrap,
-    riskFactorRework
+    riskFactorRework,
+    riskPeriod
   ]);
 
   async function fetchData() {
     try {
       setLoading(true);
       setError(null);
-      const { start, end, days } = getDateRange(timeRange);
+
+      const now = new Date();
+      const end = now;
+      const start = subDays(now, riskPeriod);
+      const previousStart = subDays(start, riskPeriod);
+      const previousEnd = start;
+      const tau = riskPeriod * 24 * 60 * 60 * 1000;
 
       // 1) Fetch Machines
       let machQ = supabase
@@ -535,7 +595,7 @@ const PredictiveInsights: React.FC = () => {
         return;
       }
 
-      // 2) Fetch Products (for cycle_time)
+      // 2) Fetch Products
       const { data: productsData, error: prodErr } = await supabase
         .from('products')
         .select('id, cycle_time');
@@ -545,7 +605,7 @@ const PredictiveInsights: React.FC = () => {
         productCycleMap.set(prod.id, prod.cycle_time || 1);
       });
 
-      // 3) Fetch Lots (note: column is "product", not "product_id")
+      // 3) Fetch Lots (current period)
       const { data: lotsData, error: lotsErr } = await supabase
         .from('lots')
         .select('id, machine, product, start_time, end_time, lot_size, ok_parts_produced')
@@ -554,7 +614,7 @@ const PredictiveInsights: React.FC = () => {
         .lte('start_time', end.toISOString());
       if (lotsErr) throw lotsErr;
 
-      // Compute average cycle time per machine (in minutes)
+      // Compute average cycle time per machine
       const cycleTimeByMachine: { [machineId: string]: number[] } = {};
       lotsData?.forEach(lot => {
         if (!lot.machine || !lot.product) return;
@@ -567,15 +627,10 @@ const PredictiveInsights: React.FC = () => {
       const machineCycleAvg: { [machineId: string]: number } = {};
       Object.keys(cycleTimeByMachine).forEach(mId => {
         const arr = cycleTimeByMachine[mId];
-        if (arr.length > 0) {
-          const sum = arr.reduce((acc, val) => acc + val, 0);
-          machineCycleAvg[mId] = sum / arr.length;
-        } else {
-          machineCycleAvg[mId] = 1;
-        }
+        machineCycleAvg[mId] = arr.length > 0 ? arr.reduce((acc, v) => acc + v, 0) / arr.length : 1;
       });
 
-      // 4) Fetch stop_events
+      // 4) Fetch stop_events (current period)
       let stopsQ = supabase
         .from('stop_events')
         .select('id, machine, start_time, end_time, failure_type, cause')
@@ -588,7 +643,7 @@ const PredictiveInsights: React.FC = () => {
       const { data: stopsData, error: stopsErr } = await stopsQ;
       if (stopsErr) throw stopsErr;
 
-      // 5) Fetch quality_issues
+      // 5) Fetch quality_issues (current period)
       let qualQ = supabase
         .from('quality_issues')
         .select('id, machine, start_time, end_time, category, cause, quantity')
@@ -599,14 +654,31 @@ const PredictiveInsights: React.FC = () => {
         if (categoryFilter === 'SCRAP' || categoryFilter === 'REWORK') {
           qualQ = qualQ.ilike('category', `%${categoryFilter.toLowerCase()}%`);
         } else {
-          // Si l'utilisateur choisit un type qui n'existe pas dans quality_issues, on force un match impossible
           qualQ = qualQ.eq('category', '???');
         }
       }
       const { data: qualData, error: qualErr } = await qualQ;
       if (qualErr) throw qualErr;
 
-      // 6) Build production dates map from Lots (dates on which production occurred)
+      // 6) Fetch previous period stop_events
+      const { data: stopsDataPrev, error: stopsPrevErr } = await supabase
+        .from('stop_events')
+        .select('id, machine, start_time, end_time, failure_type, cause')
+        .eq('project_id', projectId)
+        .gte('start_time', previousStart.toISOString())
+        .lte('start_time', previousEnd.toISOString());
+      if (stopsPrevErr) throw stopsPrevErr;
+
+      // 7) Fetch previous period quality_issues
+      const { data: qualDataPrev, error: qualPrevErr } = await supabase
+        .from('quality_issues')
+        .select('id, machine, start_time, end_time, category, cause, quantity')
+        .eq('project_id', projectId)
+        .gte('start_time', previousStart.toISOString())
+        .lte('start_time', previousEnd.toISOString());
+      if (qualPrevErr) throw qualPrevErr;
+
+      // Build a map of production days per machine
       const productionDatesByMachine: { [machineId: string]: Set<string> } = {};
       lotsData?.forEach(lot => {
         if (lot.machine) {
@@ -624,21 +696,17 @@ const PredictiveInsights: React.FC = () => {
         if (productionDates.size === 0) continue;
         const productionDays = productionDates.size;
 
-        // Real cycle time for machine (in minutes)
         const realCycleTime = machineCycleAvg[mach.id] || 1;
+        const mStops = (stopsData || []).filter(s => s.machine === mach.id);
+        const mQual = (qualData || []).filter(q => q.machine === mach.id);
+        const mLots = (lotsData || []).filter(l => l.machine === mach.id);
 
-        const mStops = stopsData?.filter(s => s.machine === mach.id) || [];
-        const mQual = qualData?.filter(q => q.machine === mach.id) || [];
-        const mLots = lotsData?.filter(l => l.machine === mach.id) || [];
-
-        let totalLots = 0,
-          totalOk = 0;
+        let totalLots = 0, totalOk = 0;
         mLots.forEach(lot => {
           totalLots += lot.lot_size || 0;
           totalOk += lot.ok_parts_produced || 0;
         });
 
-        // Downtime for stops (calculé sur l'ensemble de la période)
         let sumUnplannedMin = 0;
         mStops.forEach(stp => {
           const ft = mapStopFailureType(stp.failure_type);
@@ -650,30 +718,23 @@ const PredictiveInsights: React.FC = () => {
         });
         const totalDowntimeH = sumUnplannedMin / 60;
 
-        // Calcul de MTTR (inchangé)
         const sortedStops = [...mStops].sort(
-          (a, b) =>
-            new Date(a.start_time).getTime() - new Date(b.start_time).getTime()
+          (a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime()
         );
-        let sumStopH = 0,
-          sumSqStopH = 0;
+        let sumStopH = 0;
         sortedStops.forEach(stp => {
           const sT = new Date(stp.start_time);
           let eT = stp.end_time ? new Date(stp.end_time) : end;
           if (eT > end) eT = end;
           const durH = differenceInMinutes(eT, sT) / 60;
           sumStopH += durH;
-          sumSqStopH += durH * durH;
         });
         const stopCount = sortedStops.length;
         const mttr = stopCount > 0 ? sumStopH / stopCount : 0;
 
-        // Nouveau calcul du MTBF basé sur le temps de production uniquement
         const dailyOpenMin = mach.opening_time_minutes || 480;
         const dailyOpenH = dailyOpenMin / 60;
-        // Période de production en heures = nombre de jours de production * heures d'ouverture
         const productionPeriodH = productionDays * dailyOpenH;
-        // Filtrer les arrêts se produisant sur des jours de production
         const productionStops = mStops.filter(s =>
           productionDates.has(format(new Date(s.start_time), 'yyyy-MM-dd'))
         );
@@ -684,37 +745,19 @@ const PredictiveInsights: React.FC = () => {
           if (eT > end) eT = end;
           sumStopHProduction += differenceInMinutes(eT, sT) / 60;
         });
-        const mtbf =
-          productionStops.length > 0
-            ? (productionPeriodH - sumStopHProduction) / productionStops.length
-            : productionPeriodH - sumStopHProduction;
+        const mtbf = productionStops.length > 0
+          ? (productionPeriodH - sumStopHProduction) / productionStops.length
+          : productionPeriodH - sumStopHProduction;
 
-        const recentStart = subDays(end, differenceInDays(end, start));
-        const recentStops = mStops.filter(s => new Date(s.start_time) >= recentStart).length;
+        const recentStops = mStops.filter(s => new Date(s.start_time) >= start).length;
 
         const computeWeight = (eventTime: Date) =>
-          Math.exp((eventTime.getTime() - end.getTime()) / TAU_MS);
+          Math.exp((eventTime.getTime() - end.getTime()) / tau);
 
-        // Aggregation by cause
-        interface CAgg {
-          type: string;
-          causeText: string;
-          occurrences: number;
-          totalDurH: number;
-          sumSqDurH: number;
-          scrap: number;
-          rework: number;
-          lastOccurrence: Date | null;
-          weightedOccurrences: number;
-          weightedTotalDurH: number;
-          weightedSumSqDurH: number;
-          weightedQuantitySum?: number;
-          weightedQuantitySumSq?: number;
-          occurrenceTimestamps: Date[];
-        }
+        // Build causeMap for current period
         const causeMap = new Map<string, CAgg>();
 
-        // Process stops events
+        // Process stop events
         for (const stp of mStops) {
           const ft = mapStopFailureType(stp.failure_type);
           const cText = stp.cause || '(No cause)';
@@ -724,7 +767,6 @@ const PredictiveInsights: React.FC = () => {
           if (eT > end) eT = end;
           const durH = differenceInMinutes(eT, sT) / 60;
           const weight = computeWeight(sT);
-
           if (!causeMap.has(key)) {
             causeMap.set(key, {
               type: ft,
@@ -738,7 +780,8 @@ const PredictiveInsights: React.FC = () => {
               weightedOccurrences: 0,
               weightedTotalDurH: 0,
               weightedSumSqDurH: 0,
-              occurrenceTimestamps: []
+              occurrenceTimestamps: [],
+              durations: []
             });
           }
           const cObj = causeMap.get(key)!;
@@ -752,16 +795,18 @@ const PredictiveInsights: React.FC = () => {
             cObj.lastOccurrence = sT;
           }
           cObj.occurrenceTimestamps.push(sT);
+          cObj.durations!.push(durH);
         }
 
-        // Process quality issues (Scrap/Rework)
+        // Process quality issues (SCRAP/REWORK)
         for (const qi of mQual) {
           const qType = mapQualityCategory(qi.category);
+          if (qType !== 'SCRAP' && qType !== 'REWORK') continue;
           const cText = qi.cause || '(No cause)';
           const key = qType + '|' + cText;
           const qiT = new Date(qi.start_time);
           const weight = computeWeight(qiT);
-
+          const qty = qi.quantity || 0;
           if (!causeMap.has(key)) {
             causeMap.set(key, {
               type: qType,
@@ -777,12 +822,12 @@ const PredictiveInsights: React.FC = () => {
               weightedSumSqDurH: 0,
               weightedQuantitySum: 0,
               weightedQuantitySumSq: 0,
-              occurrenceTimestamps: []
+              occurrenceTimestamps: [],
+              durations: []
             });
           }
           const cObj = causeMap.get(key)!;
           cObj.occurrences++;
-          const qty = qi.quantity || 0;
           if (qType === 'SCRAP') {
             cObj.scrap += qty;
           } else if (qType === 'REWORK') {
@@ -795,78 +840,225 @@ const PredictiveInsights: React.FC = () => {
             cObj.lastOccurrence = qiT;
           }
           cObj.occurrenceTimestamps.push(qiT);
+          cObj.durations!.push(qty);
         }
 
-        // Build causeList from causeMap
-        const causeList: FailureCause[] = [];
+        // Build prevCauseMap for the previous period
+        const prevStops = (stopsDataPrev || []).filter(s => s.machine === mach.id);
+        const prevQual = (qualDataPrev || []).filter(q => q.machine === mach.id);
+        const prevCauseMap = new Map<string, CAgg>();
+
+        // Previous stops
+        for (const stp of prevStops) {
+          const ft = mapStopFailureType(stp.failure_type);
+          const cText = stp.cause || '(No cause)';
+          const key = ft + '|' + cText;
+          const sT = new Date(stp.start_time);
+          let eT = stp.end_time ? new Date(stp.end_time) : previousEnd;
+          if (eT > previousEnd) eT = previousEnd;
+          const durH = differenceInMinutes(eT, sT) / 60;
+          const weight = computeWeight(sT);
+          if (!prevCauseMap.has(key)) {
+            prevCauseMap.set(key, {
+              type: ft,
+              causeText: cText,
+              occurrences: 0,
+              totalDurH: 0,
+              sumSqDurH: 0,
+              scrap: 0,
+              rework: 0,
+              lastOccurrence: null,
+              weightedOccurrences: 0,
+              weightedTotalDurH: 0,
+              weightedSumSqDurH: 0,
+              occurrenceTimestamps: [],
+              durations: []
+            });
+          }
+          const cObj = prevCauseMap.get(key)!;
+          cObj.occurrences++;
+          cObj.totalDurH += durH;
+          cObj.sumSqDurH += durH * durH;
+          cObj.weightedOccurrences += weight;
+          cObj.weightedTotalDurH += weight * durH;
+          cObj.weightedSumSqDurH += weight * durH * durH;
+          if (!cObj.lastOccurrence || sT > cObj.lastOccurrence) {
+            cObj.lastOccurrence = sT;
+          }
+          cObj.occurrenceTimestamps.push(sT);
+          cObj.durations!.push(durH);
+        }
+
+        // Previous quality issues
+        for (const qi of prevQual) {
+          const qType = mapQualityCategory(qi.category);
+          if (qType !== 'SCRAP' && qType !== 'REWORK') continue;
+          const cText = qi.cause || '(No cause)';
+          const key = qType + '|' + cText;
+          const qiT = new Date(qi.start_time);
+          const weight = computeWeight(qiT);
+          const qty = qi.quantity || 0;
+          if (!prevCauseMap.has(key)) {
+            prevCauseMap.set(key, {
+              type: qType,
+              causeText: cText,
+              occurrences: 0,
+              totalDurH: 0,
+              sumSqDurH: 0,
+              scrap: 0,
+              rework: 0,
+              lastOccurrence: null,
+              weightedOccurrences: 0,
+              weightedTotalDurH: 0,
+              weightedSumSqDurH: 0,
+              occurrenceTimestamps: [],
+              durations: []
+            });
+          }
+          const cObj = prevCauseMap.get(key)!;
+          cObj.occurrences++;
+          if (qType === 'SCRAP') {
+            cObj.scrap += qty;
+          } else if (qType === 'REWORK') {
+            cObj.rework += qty;
+          }
+          cObj.weightedOccurrences += weight;
+          cObj.weightedQuantitySum! += weight * qty;
+          cObj.weightedQuantitySumSq! += weight * qty * qty;
+          if (!cObj.lastOccurrence || qiT > cObj.lastOccurrence) {
+            cObj.lastOccurrence = qiT;
+          }
+          cObj.occurrenceTimestamps.push(qiT);
+          cObj.durations!.push(qty);
+        }
+
+        // Final causeList
+        let causeList: FailureCause[] = [];
         causeMap.forEach(cObj => {
-          let avgDuration = cObj.occurrences > 0 ? cObj.totalDurH / cObj.occurrences : 0;
-          const variance =
-            cObj.occurrences > 0
-              ? cObj.sumSqDurH / cObj.occurrences - avgDuration * avgDuration
-              : 0;
-          let stdDeviation = Math.sqrt(Math.max(variance, 0));
-          const variabilityIndex = avgDuration > 0 ? stdDeviation / avgDuration : 0;
-          const lastOccurrenceStr = cObj.lastOccurrence ? format(cObj.lastOccurrence, 'yyyy-MM-dd') : 'N/A';
+          let avgDuration = 0,
+            stdDeviation = 0,
+            IQR = NaN,
+            variabilityIndex = 0,
+            severityValue = NaN;
+          const durations = cObj.durations || [];
+          if (durations.length < 2) {
+            avgDuration = durations.length === 1 ? durations[0] : NaN;
+          } else {
+            const sortedDur = [...durations].sort((a, b) => a - b);
+            const sumDur = sortedDur.reduce((acc, val) => acc + val, 0);
+            avgDuration = sumDur / sortedDur.length;
+            const median = (arr: number[]): number => {
+              const mid = Math.floor(arr.length / 2);
+              return arr.length % 2 !== 0 ? arr[mid] : (arr[mid - 1] + arr[mid]) / 2;
+            };
+            const firstHalf = sortedDur.slice(0, Math.floor(sortedDur.length / 2));
+            const secondHalf = sortedDur.slice(Math.ceil(sortedDur.length / 2));
+            const Q1 = median(firstHalf);
+            const Q3 = median(secondHalf);
+            IQR = Q3 - Q1;
+            stdDeviation = Math.sqrt(
+              sortedDur.reduce((sum, v) => sum + Math.pow(v - avgDuration, 2), 0) / sortedDur.length
+            );
+            variabilityIndex = avgDuration > 0 ? stdDeviation / avgDuration : 0;
+            if (sortedDur.length >= 30) {
+              const thresh = quantile(sortedDur, 0.75);
+              const exceedances = sortedDur.filter(d => d > thresh).map(d => d - thresh);
+              if (exceedances.length > 0) {
+                const meanExceed = exceedances.reduce((acc, val) => acc + val, 0) / exceedances.length;
+                const varExceed = exceedances.reduce((acc, val) => acc + Math.pow(val - meanExceed, 2), 0) / exceedances.length;
+                const potShape = (1 - (meanExceed * meanExceed) / varExceed) / 2;
+                const potScale = meanExceed * (1 - potShape);
+                let medianExceed = 0;
+                if (potShape !== 0) {
+                  medianExceed =
+                    (potScale / potShape) *
+                    (Math.pow(Math.log(2), -potShape) - 1);
+                } else {
+                  medianExceed = potScale * Math.log(2);
+                }
+                severityValue = avgDuration + 2 * medianExceed;
+              } else {
+                severityValue = avgDuration + 1.5 * IQR;
+              }
+            } else {
+              severityValue = avgDuration + 1.5 * IQR;
+            }
+          }
 
-          // Weibull parameters based on occurrence intervals (in days)
-          const { shape, scale } = calculateWeibullFromTimestamps(cObj.occurrenceTimestamps);
-          const medianInterval = weibullMedian(shape, scale);
-          const expectedDate = format(addDays(new Date(), medianInterval), 'yyyy-MM-dd');
-
-          const weightedOccurrence = cObj.weightedOccurrences;
-          const occurrencePerWeek = productionDays > 0 ? (weightedOccurrence * 7) / productionDays : 0;
-
-          let severityValue = 0;
           let predictedRiskScore = 0;
+          const dailyOpenH = mach.opening_time_minutes ? mach.opening_time_minutes / 60 : 8;
+          const occurrencePerWeek = productionDays > 0 ? (cObj.weightedOccurrences * 7) / productionDays : 0;
           let certainty = '';
+          if (cObj.occurrences < 5) {
+            certainty = 'Insufficient Data';
+          } else if (variabilityIndex > 1) {
+            certainty = 'Not Normal';
+          } else {
+            certainty = 'High Certainty';
+          }
 
           if (cObj.type === 'SCRAP' || cObj.type === 'REWORK') {
-            const totalAffected = cObj.type === 'SCRAP' ? cObj.scrap : cObj.rework;
-            const avgParts = cObj.occurrences > 0 ? totalAffected / cObj.occurrences : 0;
-            const wQty = cObj.weightedQuantitySum || 0;
-            const wQtySq = cObj.weightedQuantitySumSq || 0;
-            const wAvgParts = weightedOccurrence > 0 ? wQty / weightedOccurrence : 0;
-            const wVarParts =
-              weightedOccurrence > 0
-                ? wQtySq / weightedOccurrence - wAvgParts * wAvgParts
-                : 0;
-            const wStdParts = Math.sqrt(Math.max(wVarParts, 0));
-
-            avgDuration = avgParts;
-            stdDeviation = wStdParts;
-            const probableAffected = wAvgParts + 2 * wStdParts;
-            severityValue = probableAffected;
-
             const riskFactor = cObj.type === 'SCRAP' ? riskFactorScrap : riskFactorRework;
-            predictedRiskScore =
-              dailyOpenH > 0
-                ? (occurrencePerWeek *
-                    probableAffected *
-                    (realCycleTime / 3600) *
-                    riskFactor *
-                    100) /
-                  dailyOpenH
-                : 0;
-
-            const varIndex = avgParts > 0 ? wStdParts / avgParts : 0;
-            certainty =
-              cObj.occurrences < 5
-                ? 'Insufficient Data'
-                : varIndex > 1
-                ? 'Not Normal'
-                : 'High Certainty';
+            if (!isNaN(severityValue) && dailyOpenH > 0) {
+              predictedRiskScore =
+                (occurrencePerWeek * severityValue * (realCycleTime / 3600) * riskFactor * 100) / dailyOpenH;
+            }
           } else {
-            severityValue = avgDuration + 2 * stdDeviation;
-            predictedRiskScore =
-              dailyOpenH > 0 ? ((occurrencePerWeek * severityValue) / dailyOpenH) * 100 : 0;
-            certainty =
-              cObj.occurrences < 5
-                ? 'Insufficient Data'
-                : variabilityIndex > 1
-                ? 'Not Normal'
-                : 'High Certainty';
+            if (!isNaN(severityValue) && dailyOpenH > 0) {
+              predictedRiskScore = (occurrencePerWeek * severityValue * 100) / dailyOpenH;
+            }
           }
+          if (isNaN(predictedRiskScore)) predictedRiskScore = 0;
+
+          let trend = 'N/A';
+          const prevKey = cObj.type + '|' + cObj.causeText;
+          if (prevCauseMap.has(prevKey)) {
+            const prevObj = prevCauseMap.get(prevKey)!;
+            if (prevObj.totalDurH > 0) {
+              const change = ((cObj.totalDurH - prevObj.totalDurH) / prevObj.totalDurH) * 100;
+              trend = change.toFixed(0) + '%';
+            }
+          }
+
+          let shapeForExpected = 0,
+            scaleForExpected = 0,
+            medianInterval = 0;
+          if (cObj.occurrenceTimestamps.length >= 2) {
+            if (cObj.durations && cObj.durations.length >= 30) {
+              const sortedDur = [...cObj.durations].sort((a, b) => a - b);
+              const thresh = quantile(sortedDur, 0.75);
+              const exceedances = sortedDur.filter(d => d > thresh).map(d => d - thresh);
+              if (exceedances.length > 0) {
+                const meanExceed = exceedances.reduce((acc, val) => acc + val, 0) / exceedances.length;
+                const varExceed = exceedances.reduce(
+                  (acc, val) => acc + Math.pow(val - meanExceed, 2),
+                  0
+                ) / exceedances.length;
+                const potShape = (1 - (meanExceed * meanExceed) / varExceed) / 2;
+                const potScale = meanExceed * (1 - potShape);
+                if (potShape !== 0) {
+                  medianInterval =
+                    (potScale / potShape) *
+                    (Math.pow(Math.log(2), -potShape) - 1);
+                } else {
+                  medianInterval = potScale * Math.log(2);
+                }
+                shapeForExpected = potShape;
+                scaleForExpected = potScale;
+              } else {
+                const w = calculateWeibullFromTimestamps(cObj.occurrenceTimestamps);
+                shapeForExpected = w.shape;
+                scaleForExpected = w.scale;
+                medianInterval = weibullMedian(w.shape, w.scale);
+              }
+            } else {
+              const w = calculateWeibullFromTimestamps(cObj.occurrenceTimestamps);
+              shapeForExpected = w.shape;
+              scaleForExpected = w.scale;
+              medianInterval = weibullMedian(w.shape, w.scale);
+            }
+          }
+          const expectedDate = format(addDays(new Date(), medianInterval), 'yyyy-MM-dd');
 
           causeList.push({
             type: cObj.type,
@@ -875,35 +1067,64 @@ const PredictiveInsights: React.FC = () => {
             totalDurationH: cObj.totalDurH,
             scrapCount: cObj.scrap,
             reworkCount: cObj.rework,
-            lastOccurrence: lastOccurrenceStr,
+            lastOccurrence: cObj.lastOccurrence ? format(cObj.lastOccurrence, 'yyyy-MM-dd') : 'N/A',
             avgDuration,
-            stdDeviation,
             variabilityIndex,
+            IQR,
             occurrencePerWeek,
             severityValue,
             predictedRiskScore,
             certainty,
             expectedDate,
-            weibullParams: { shape, scale }
+            trend,
+            weibullParams: { shape: shapeForExpected, scale: scaleForExpected }
           });
         });
 
-        if (causeList.length === 0) continue;
-        let finalCauseList = causeList;
-        if (categoryFilter !== 'ALL') {
-          finalCauseList = finalCauseList.filter(c => c.type === categoryFilter);
-          if (finalCauseList.length === 0) continue;
+        // Filter by next occurrence if needed
+        if (expectedDateFilter !== 'ALL') {
+          if (expectedDateFilter === 'TODAY') {
+            const todayStr = format(new Date(), 'yyyy-MM-dd');
+            causeList = causeList.filter(cause => cause.expectedDate === todayStr);
+          } else {
+            const dateRange = getExpectedDateRange(expectedDateFilter);
+            if (dateRange) {
+              causeList = causeList.filter(cause => {
+                const ed = new Date(cause.expectedDate);
+                return ed >= dateRange.start && ed <= dateRange.end;
+              });
+            }
+          }
+          if (causeList.length === 0) continue;
         }
 
-        const nextFail = format(new Date(), 'yyyy-MM-dd');
-        const machineRisk = finalCauseList.reduce((acc, c) => acc + c.predictedRiskScore, 0);
+        const nextFail = causeList.length > 0
+          ? format(
+              causeList.reduce((min, cause) => {
+                const ed = new Date(cause.expectedDate);
+                return ed < min ? ed : min;
+              }, new Date(causeList[0].expectedDate)),
+              'yyyy-MM-dd'
+            )
+          : 'N/A';
 
-        const machineTotalScrap = finalCauseList
+        const machineTotalScrap = causeList
           .filter(c => c.type === 'SCRAP')
           .reduce((sum, c) => sum + c.scrapCount, 0);
-        const machineTotalRework = finalCauseList
+        const machineTotalRework = causeList
           .filter(c => c.type === 'REWORK')
           .reduce((sum, c) => sum + c.reworkCount, 0);
+
+        let machineRisk = causeList.reduce((acc, c) => acc + c.predictedRiskScore, 0);
+        if (machineRisk === 0) {
+          machineRisk = NaN;
+        }
+        if (
+          (categoryFilter === 'SCRAP' && riskFactorScrap === 0) ||
+          (categoryFilter === 'REWORK' && riskFactorRework === 0)
+        ) {
+          machineRisk = NaN;
+        }
 
         results.push({
           id: mach.id,
@@ -915,14 +1136,18 @@ const PredictiveInsights: React.FC = () => {
           recentStops,
           totalScrap: machineTotalScrap,
           totalRework: machineTotalRework,
-          predictedRisk: parseFloat(machineRisk.toFixed(1)),
-          causeList: finalCauseList,
+          predictedRisk: machineRisk,
+          causeList,
           sampleSize: { totalLots, totalOkParts: totalOk },
           nextFailureGlobal: nextFail
         });
       }
 
-      results.sort((a, b) => b.predictedRisk - a.predictedRisk);
+      results.sort((a, b) => {
+        const valA = isNaN(a.predictedRisk) ? -1 : a.predictedRisk;
+        const valB = isNaN(b.predictedRisk) ? -1 : b.predictedRisk;
+        return valB - valA;
+      });
       setMachineList(results);
       setLoading(false);
     } catch (err) {
@@ -932,18 +1157,21 @@ const PredictiveInsights: React.FC = () => {
     }
   }
 
-  // Déterminer la liste des machines à afficher en fonction de la pagination
   const displayedMachines = machineList.slice(0, machinePage * 10);
 
-  // Texte pour le tooltip de la classification de risque
   const riskClassificationText = `Risk Classification:
-- ≥ 100: Critical (e.g. potential loss of one full operating day per week)
+- ≥ 100: Critical
 - 50–99: Severe
 - 25–49: High
 - 10–24: Moderate
 - 2.5–9: Minor
 - < 2.5: Low
+(NaN or 0 => N/A, meaning insufficient data or factor = 0)
 `;
+
+  const handleExport = () => {
+    handleExportJson(machineList);
+  };
 
   return (
     <ProjectLayout>
@@ -953,56 +1181,10 @@ const PredictiveInsights: React.FC = () => {
           <div>
             <h2 className="text-2xl font-bold text-gray-900">Predictive Insights</h2>
             <p className="text-sm text-gray-500 mt-1">
-              Advanced analysis from production lots, stop_events, and quality_issues.
+              Advanced analysis from production lots, stop_events, and quality_issues. Data History: Last {riskPeriod} days; Scrap Risk Factor: {riskFactorScrap}; Rework Risk Factor: {riskFactorRework}.
             </p>
           </div>
           <div className="flex items-center space-x-3 mt-4 md:mt-0">
-            <div className="relative">
-              <button
-                onClick={() => setShowRangeDropdown(!showRangeDropdown)}
-                className="inline-flex items-center px-4 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
-              >
-                <Calendar className="h-4 w-4 mr-2" />
-                {timeRange === '7d'
-                  ? 'Last 7 days'
-                  : timeRange === '90d'
-                  ? 'Last 90 days'
-                  : 'Last 30 days'}
-                <ChevronDown className="ml-2 h-4 w-4" />
-              </button>
-              {showRangeDropdown && (
-                <div className="absolute right-0 mt-2 w-48 bg-white border border-gray-200 rounded-md shadow z-20">
-                  <button
-                    onClick={() => {
-                      setTimeRange('7d');
-                      setShowRangeDropdown(false);
-                    }}
-                    className="block w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
-                  >
-                    Last 7 days
-                  </button>
-                  <button
-                    onClick={() => {
-                      setTimeRange('30d');
-                      setShowRangeDropdown(false);
-                    }}
-                    className="block w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
-                  >
-                    Last 30 days
-                  </button>
-                  <button
-                    onClick={() => {
-                      setTimeRange('90d');
-                      setShowRangeDropdown(false);
-                    }}
-                    className="block w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
-                  >
-                    Last 90 days
-                  </button>
-                </div>
-              )}
-            </div>
-            {/* Bouton Parameters avant Export */}
             <button
               onClick={() => setShowRiskModal(true)}
               className="inline-flex items-center px-4 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
@@ -1011,7 +1193,7 @@ const PredictiveInsights: React.FC = () => {
               Parameters
             </button>
             <button
-              onClick={() => alert('Export not implemented')}
+              onClick={handleExport}
               className="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700"
             >
               <Download className="h-4 w-4 mr-2" />
@@ -1030,9 +1212,7 @@ const PredictiveInsights: React.FC = () => {
           />
           <select
             value={categoryFilter}
-            onChange={(e) =>
-              setCategoryFilter(e.target.value as CategoryFilterType)
-            }
+            onChange={(e) => setCategoryFilter(e.target.value as CategoryFilterType)}
             className="border border-gray-300 rounded-md px-3 py-2 text-sm"
           >
             <option value="ALL">All Categories</option>
@@ -1044,9 +1224,7 @@ const PredictiveInsights: React.FC = () => {
           </select>
           <select
             value={expectedDateFilter}
-            onChange={(e) =>
-              setExpectedDateFilter(e.target.value as ExpectedDateFilter)
-            }
+            onChange={(e) => setExpectedDateFilter(e.target.value as ExpectedDateFilter)}
             className="border border-gray-300 rounded-md px-3 py-2 text-sm"
           >
             <option value="ALL">All Next Occurrences</option>
@@ -1057,7 +1235,6 @@ const PredictiveInsights: React.FC = () => {
             <option value="NEXT_6_MONTHS">Next 6 Months</option>
             <option value="THIS_YEAR">This Year</option>
           </select>
-          {/* Nouveau dropdown pour limiter le nombre de causes affichées */}
           <select
             value={causeLimit}
             onChange={(e) => {
@@ -1098,15 +1275,25 @@ const PredictiveInsights: React.FC = () => {
           <>
             <div className="space-y-6">
               {displayedMachines.map(mach => {
-                // Pour chaque machine, trier les causes par risque décroissant et appliquer la limitation
-                const sortedCauses = [...mach.causeList].sort(
-                  (a, b) => b.predictedRiskScore - a.predictedRiskScore
-                );
-                const displayedCauses =
-                  causeLimit === 'ALL' ? sortedCauses : sortedCauses.slice(0, causeLimit);
-                const stopsLabel = `Stops (Last ${
-                  timeRange === '7d' ? 7 : timeRange === '90d' ? 90 : 30
-                } days)`;
+                const sortedCauses = [...mach.causeList].sort((a, b) => b.predictedRiskScore - a.predictedRiskScore);
+                const displayedCauses = causeLimit === 'ALL' ? sortedCauses : sortedCauses.slice(0, causeLimit);
+
+                let machineRisk = mach.predictedRisk;
+                if (machineRisk === 0) {
+                  machineRisk = NaN;
+                }
+                const machineRiskText = isNaN(machineRisk) ? 'N/A' : machineRisk.toFixed(0);
+
+                const riskClassificationText = `Risk Classification:
+- ≥ 100: Critical
+- 50–99: Severe
+- 25–49: High
+- 10–24: Moderate
+- 2.5–9: Minor
+- < 2.5: Low
+(NaN or 0 => N/A, meaning insufficient data or factor = 0)
+`;
+
                 return (
                   <div key={mach.id} className="bg-white shadow rounded-lg p-6">
                     {/* Machine Header */}
@@ -1120,7 +1307,7 @@ const PredictiveInsights: React.FC = () => {
                                 mach.predictedRisk
                               )}`}
                             >
-                              Risk: {mach.predictedRisk.toFixed(0)}
+                              Risk: {machineRiskText}
                               <HelpCircle className="ml-1 h-4 w-4 text-blue-500 cursor-pointer" />
                             </span>
                           </Tooltip>
@@ -1159,7 +1346,7 @@ const PredictiveInsights: React.FC = () => {
                           </div>
                         </div>
                         <div className="bg-gray-50 p-4 rounded text-center">
-                          <span className="text-xs text-gray-500">{stopsLabel}</span>
+                          <span className="text-xs text-gray-500">{`Stops (Last ${riskPeriod} days)`}</span>
                           <div className="mt-1 text-base font-semibold text-gray-900">
                             {mach.recentStops}
                           </div>
@@ -1167,7 +1354,7 @@ const PredictiveInsights: React.FC = () => {
                       </div>
                     ) : null}
 
-                    {/* KPI Scrap/Rework selon le filtre */}
+                    {/* KPI Scrap/Rework */}
                     {(categoryFilter === 'ALL' ||
                       categoryFilter === 'SCRAP' ||
                       categoryFilter === 'REWORK') && (
@@ -1194,14 +1381,19 @@ const PredictiveInsights: React.FC = () => {
                     {/* Cause List */}
                     <div className="space-y-4">
                       {displayedCauses.map((cause, idx) => (
-                        <CauseCard key={`${cause.type}_${idx}`} cause={cause} />
+                        <CauseCard
+                          key={`${cause.type}_${idx}`}
+                          cause={cause}
+                          riskFactorScrap={riskFactorScrap}
+                          riskFactorRework={riskFactorRework}
+                          categoryFilter={categoryFilter}
+                        />
                       ))}
                     </div>
                   </div>
                 );
               })}
             </div>
-            {/* Pagination : bouton "Load More Machines" */}
             {machineList.length > displayedMachines.length && (
               <div className="mt-6 flex justify-center">
                 <button
@@ -1215,12 +1407,15 @@ const PredictiveInsights: React.FC = () => {
           </>
         )}
       </div>
+
       {showRiskModal && (
         <RiskParametersModal
           riskFactorScrap={riskFactorScrap}
           riskFactorRework={riskFactorRework}
+          riskPeriod={riskPeriod}
           setRiskFactorScrap={setRiskFactorScrap}
           setRiskFactorRework={setRiskFactorRework}
+          setRiskPeriod={setRiskPeriod}
           onClose={() => setShowRiskModal(false)}
         />
       )}
