@@ -32,12 +32,18 @@ import ProjectLayout from '../../../components/layout/ProjectLayout';
 import { supabase } from '../../../lib/supabase';
 
 // --------------------- Tooltip Component ---------------------
-const Tooltip: React.FC<{ content: string; className?: string }> = ({
-  content,
-  className = '',
-  children
-}) => {
+interface TooltipProps {
+  content: string;
+  className?: string;
+}
+
+/**
+ * Tooltip gérant un texte long avec possibilité de scroll
+ * et un effet de fondu (opacity).
+ */
+const Tooltip: React.FC<TooltipProps> = ({ content, className = '', children }) => {
   const [hovered, setHovered] = useState(false);
+
   return (
     <div
       className={`relative inline-block ${className}`}
@@ -45,11 +51,32 @@ const Tooltip: React.FC<{ content: string; className?: string }> = ({
       onMouseLeave={() => setHovered(false)}
     >
       {children}
-      {hovered && (
-        <div className="absolute bottom-full mb-1 left-1/2 transform -translate-x-1/2 bg-gray-700 text-white text-xs rounded py-1 px-2 z-50 w-64 text-center">
+
+      {/* Conteneur principal du tooltip (toujours monté) */}
+      <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 flex flex-col items-center">
+        {/* 
+          La visibilité et l'interaction dépendent de hovered.
+          - pointer-events-none : on ne peut pas cliquer/scroll
+          - pointer-events-auto : on peut cliquer/scroll
+        */}
+        <div
+          className={`
+            bg-gray-700 text-white text-xs rounded py-1 px-2 z-50 w-64 text-left
+            transition-all duration-200 whitespace-pre-wrap break-words
+            max-h-60 overflow-y-auto
+            ${hovered ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'}
+          `}
+        >
           {content}
         </div>
-      )}
+        {/* Petit triangle */}
+        <div
+          className={`
+            w-2 h-2 bg-gray-700 transform rotate-45 -mt-1 z-50 transition-all duration-200
+            ${hovered ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'}
+          `}
+        />
+      </div>
     </div>
   );
 };
@@ -431,7 +458,7 @@ const RiskParametersModal: React.FC<RiskParametersModalProps> = ({
   setRiskPeriod,
   onClose
 }) => {
-  // Local state so changes are applied only when "Apply" is clicked
+  // État local pour n'appliquer qu'au clic "Apply"
   const [localRiskPeriod, setLocalRiskPeriod] = useState<number>(riskPeriod);
   const [localRiskFactorScrap, setLocalRiskFactorScrap] = useState<number>(riskFactorScrap);
   const [localRiskFactorRework, setLocalRiskFactorRework] = useState<number>(riskFactorRework);
@@ -531,7 +558,7 @@ const handleExportJson = (data: MachineHealth[]) => {
 const PredictiveInsights: React.FC = () => {
   const { projectId } = useParams<{ projectId: string }>();
 
-  // Filter states
+  // Filtres
   const [categoryFilter, setCategoryFilter] = useState<CategoryFilterType>('ALL');
   const [expectedDateFilter, setExpectedDateFilter] = useState<ExpectedDateFilter>('ALL');
   const [machineSearch, setMachineSearch] = useState('');
@@ -541,14 +568,13 @@ const PredictiveInsights: React.FC = () => {
 
   // Pagination
   const [machinePage, setMachinePage] = useState<number>(1);
-  // Cause limit
+  // Limite de causes
   const [causeLimit, setCauseLimit] = useState<number | 'ALL'>(3);
 
-  // Risk factors & period
+  // Paramètres de risque
   const [riskFactorScrap, setRiskFactorScrap] = useState<number>(INITIAL_RISK_FACTOR_SCRAP);
   const [riskFactorRework, setRiskFactorRework] = useState<number>(INITIAL_RISK_FACTOR_REWORK);
-  const [riskPeriod, setRiskPeriod] = useState<number>(30); // default: 30 days
-  // Risk Parameters modal
+  const [riskPeriod, setRiskPeriod] = useState<number>(30); // par défaut 30 jours
   const [showRiskModal, setShowRiskModal] = useState<boolean>(false);
 
   useEffect(() => {
@@ -579,7 +605,7 @@ const PredictiveInsights: React.FC = () => {
       const previousEnd = start;
       const tau = riskPeriod * 24 * 60 * 60 * 1000;
 
-      // 1) Fetch Machines
+      // 1) Récupération des machines
       let machQ = supabase
         .from('machines')
         .select('id, name, opening_time_minutes')
@@ -595,7 +621,7 @@ const PredictiveInsights: React.FC = () => {
         return;
       }
 
-      // 2) Fetch Products
+      // 2) Récupération des produits
       const { data: productsData, error: prodErr } = await supabase
         .from('products')
         .select('id, cycle_time');
@@ -605,7 +631,7 @@ const PredictiveInsights: React.FC = () => {
         productCycleMap.set(prod.id, prod.cycle_time || 1);
       });
 
-      // 3) Fetch Lots (current period)
+      // 3) Récupération des lots (période courante)
       const { data: lotsData, error: lotsErr } = await supabase
         .from('lots')
         .select('id, machine, product, start_time, end_time, lot_size, ok_parts_produced')
@@ -614,7 +640,7 @@ const PredictiveInsights: React.FC = () => {
         .lte('start_time', end.toISOString());
       if (lotsErr) throw lotsErr;
 
-      // Compute average cycle time per machine
+      // Calcul du temps de cycle moyen par machine
       const cycleTimeByMachine: { [machineId: string]: number[] } = {};
       lotsData?.forEach(lot => {
         if (!lot.machine || !lot.product) return;
@@ -630,7 +656,7 @@ const PredictiveInsights: React.FC = () => {
         machineCycleAvg[mId] = arr.length > 0 ? arr.reduce((acc, v) => acc + v, 0) / arr.length : 1;
       });
 
-      // 4) Fetch stop_events (current period)
+      // 4) Récupération des arrêts (période courante)
       let stopsQ = supabase
         .from('stop_events')
         .select('id, machine, start_time, end_time, failure_type, cause')
@@ -643,7 +669,7 @@ const PredictiveInsights: React.FC = () => {
       const { data: stopsData, error: stopsErr } = await stopsQ;
       if (stopsErr) throw stopsErr;
 
-      // 5) Fetch quality_issues (current period)
+      // 5) Récupération des issues qualité (période courante)
       let qualQ = supabase
         .from('quality_issues')
         .select('id, machine, start_time, end_time, category, cause, quantity')
@@ -654,13 +680,14 @@ const PredictiveInsights: React.FC = () => {
         if (categoryFilter === 'SCRAP' || categoryFilter === 'REWORK') {
           qualQ = qualQ.ilike('category', `%${categoryFilter.toLowerCase()}%`);
         } else {
+          // Dans ce cas, on n'aura rien
           qualQ = qualQ.eq('category', '???');
         }
       }
       const { data: qualData, error: qualErr } = await qualQ;
       if (qualErr) throw qualErr;
 
-      // 6) Fetch previous period stop_events
+      // 6) Récupération des arrêts (période précédente)
       const { data: stopsDataPrev, error: stopsPrevErr } = await supabase
         .from('stop_events')
         .select('id, machine, start_time, end_time, failure_type, cause')
@@ -669,7 +696,7 @@ const PredictiveInsights: React.FC = () => {
         .lte('start_time', previousEnd.toISOString());
       if (stopsPrevErr) throw stopsPrevErr;
 
-      // 7) Fetch previous period quality_issues
+      // 7) Récupération des issues qualité (période précédente)
       const { data: qualDataPrev, error: qualPrevErr } = await supabase
         .from('quality_issues')
         .select('id, machine, start_time, end_time, category, cause, quantity')
@@ -678,7 +705,7 @@ const PredictiveInsights: React.FC = () => {
         .lte('start_time', previousEnd.toISOString());
       if (qualPrevErr) throw qualPrevErr;
 
-      // Build a map of production days per machine
+      // Map des jours de production par machine
       const productionDatesByMachine: { [machineId: string]: Set<string> } = {};
       lotsData?.forEach(lot => {
         if (lot.machine) {
@@ -693,7 +720,7 @@ const PredictiveInsights: React.FC = () => {
 
       for (const mach of machData) {
         const productionDates = productionDatesByMachine[mach.id] || new Set();
-        if (productionDates.size === 0) continue;
+        if (productionDates.size === 0) continue; // Pas de production => pas de data
         const productionDays = productionDates.size;
 
         const realCycleTime = machineCycleAvg[mach.id] || 1;
@@ -707,10 +734,11 @@ const PredictiveInsights: React.FC = () => {
           totalOk += lot.ok_parts_produced || 0;
         });
 
+        // Calcul du downtime non planifié
         let sumUnplannedMin = 0;
         mStops.forEach(stp => {
           const ft = mapStopFailureType(stp.failure_type);
-          if (ft === 'AP') return;
+          if (ft === 'AP') return; // AP => planned downtime
           const sT = new Date(stp.start_time);
           let eT = stp.end_time ? new Date(stp.end_time) : end;
           if (eT > end) eT = end;
@@ -718,6 +746,7 @@ const PredictiveInsights: React.FC = () => {
         });
         const totalDowntimeH = sumUnplannedMin / 60;
 
+        // MTTR
         const sortedStops = [...mStops].sort(
           (a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime()
         );
@@ -732,6 +761,7 @@ const PredictiveInsights: React.FC = () => {
         const stopCount = sortedStops.length;
         const mttr = stopCount > 0 ? sumStopH / stopCount : 0;
 
+        // MTBF
         const dailyOpenMin = mach.opening_time_minutes || 480;
         const dailyOpenH = dailyOpenMin / 60;
         const productionPeriodH = productionDays * dailyOpenH;
@@ -751,13 +781,14 @@ const PredictiveInsights: React.FC = () => {
 
         const recentStops = mStops.filter(s => new Date(s.start_time) >= start).length;
 
+        // Poids exponentiel
         const computeWeight = (eventTime: Date) =>
           Math.exp((eventTime.getTime() - end.getTime()) / tau);
 
-        // Build causeMap for current period
+        // Agrégation des causes (période courante)
         const causeMap = new Map<string, CAgg>();
 
-        // Process stop events
+        // Arrêts
         for (const stp of mStops) {
           const ft = mapStopFailureType(stp.failure_type);
           const cText = stp.cause || '(No cause)';
@@ -798,7 +829,7 @@ const PredictiveInsights: React.FC = () => {
           cObj.durations!.push(durH);
         }
 
-        // Process quality issues (SCRAP/REWORK)
+        // Issues qualité (SCRAP/REWORK)
         for (const qi of mQual) {
           const qType = mapQualityCategory(qi.category);
           if (qType !== 'SCRAP' && qType !== 'REWORK') continue;
@@ -843,12 +874,12 @@ const PredictiveInsights: React.FC = () => {
           cObj.durations!.push(qty);
         }
 
-        // Build prevCauseMap for the previous period
+        // Agrégation des causes (période précédente)
         const prevStops = (stopsDataPrev || []).filter(s => s.machine === mach.id);
         const prevQual = (qualDataPrev || []).filter(q => q.machine === mach.id);
         const prevCauseMap = new Map<string, CAgg>();
 
-        // Previous stops
+        // Stops (période précédente)
         for (const stp of prevStops) {
           const ft = mapStopFailureType(stp.failure_type);
           const cText = stp.cause || '(No cause)';
@@ -889,7 +920,7 @@ const PredictiveInsights: React.FC = () => {
           cObj.durations!.push(durH);
         }
 
-        // Previous quality issues
+        // Quality issues (période précédente)
         for (const qi of prevQual) {
           const qType = mapQualityCategory(qi.category);
           if (qType !== 'SCRAP' && qType !== 'REWORK') continue;
@@ -932,7 +963,7 @@ const PredictiveInsights: React.FC = () => {
           cObj.durations!.push(qty);
         }
 
-        // Final causeList
+        // Construction de la causeList finale
         let causeList: FailureCause[] = [];
         causeMap.forEach(cObj => {
           let avgDuration = 0,
@@ -947,19 +978,24 @@ const PredictiveInsights: React.FC = () => {
             const sortedDur = [...durations].sort((a, b) => a - b);
             const sumDur = sortedDur.reduce((acc, val) => acc + val, 0);
             avgDuration = sumDur / sortedDur.length;
+
             const median = (arr: number[]): number => {
               const mid = Math.floor(arr.length / 2);
               return arr.length % 2 !== 0 ? arr[mid] : (arr[mid - 1] + arr[mid]) / 2;
             };
+
             const firstHalf = sortedDur.slice(0, Math.floor(sortedDur.length / 2));
             const secondHalf = sortedDur.slice(Math.ceil(sortedDur.length / 2));
             const Q1 = median(firstHalf);
             const Q3 = median(secondHalf);
             IQR = Q3 - Q1;
+
             stdDeviation = Math.sqrt(
               sortedDur.reduce((sum, v) => sum + Math.pow(v - avgDuration, 2), 0) / sortedDur.length
             );
             variabilityIndex = avgDuration > 0 ? stdDeviation / avgDuration : 0;
+
+            // Gestion d'exceedances (POT) ou fallback
             if (sortedDur.length >= 30) {
               const thresh = quantile(sortedDur, 0.75);
               const exceedances = sortedDur.filter(d => d > thresh).map(d => d - thresh);
@@ -997,6 +1033,7 @@ const PredictiveInsights: React.FC = () => {
             certainty = 'High Certainty';
           }
 
+          // Calcul du risk score
           if (cObj.type === 'SCRAP' || cObj.type === 'REWORK') {
             const riskFactor = cObj.type === 'SCRAP' ? riskFactorScrap : riskFactorRework;
             if (!isNaN(severityValue) && dailyOpenH > 0) {
@@ -1010,6 +1047,7 @@ const PredictiveInsights: React.FC = () => {
           }
           if (isNaN(predictedRiskScore)) predictedRiskScore = 0;
 
+          // Trend
           let trend = 'N/A';
           const prevKey = cObj.type + '|' + cObj.causeText;
           if (prevCauseMap.has(prevKey)) {
@@ -1020,6 +1058,7 @@ const PredictiveInsights: React.FC = () => {
             }
           }
 
+          // Weibull
           let shapeForExpected = 0,
             scaleForExpected = 0,
             medianInterval = 0;
@@ -1030,10 +1069,7 @@ const PredictiveInsights: React.FC = () => {
               const exceedances = sortedDur.filter(d => d > thresh).map(d => d - thresh);
               if (exceedances.length > 0) {
                 const meanExceed = exceedances.reduce((acc, val) => acc + val, 0) / exceedances.length;
-                const varExceed = exceedances.reduce(
-                  (acc, val) => acc + Math.pow(val - meanExceed, 2),
-                  0
-                ) / exceedances.length;
+                const varExceed = exceedances.reduce((acc, val) => acc + Math.pow(val - meanExceed, 2), 0) / exceedances.length;
                 const potShape = (1 - (meanExceed * meanExceed) / varExceed) / 2;
                 const potScale = meanExceed * (1 - potShape);
                 if (potShape !== 0) {
@@ -1081,7 +1117,7 @@ const PredictiveInsights: React.FC = () => {
           });
         });
 
-        // Filter by next occurrence if needed
+        // Filtrer par date attendue si nécessaire
         if (expectedDateFilter !== 'ALL') {
           if (expectedDateFilter === 'TODAY') {
             const todayStr = format(new Date(), 'yyyy-MM-dd');
@@ -1143,11 +1179,13 @@ const PredictiveInsights: React.FC = () => {
         });
       }
 
+      // Tri final par risque décroissant
       results.sort((a, b) => {
         const valA = isNaN(a.predictedRisk) ? -1 : a.predictedRisk;
         const valB = isNaN(b.predictedRisk) ? -1 : b.predictedRisk;
         return valB - valA;
       });
+
       setMachineList(results);
       setLoading(false);
     } catch (err) {
@@ -1159,14 +1197,14 @@ const PredictiveInsights: React.FC = () => {
 
   const displayedMachines = machineList.slice(0, machinePage * 10);
 
-  const riskClassificationText = `Risk Classification:
-- ≥ 100: Critical
-- 50–99: Severe
-- 25–49: High
-- 10–24: Moderate
-- 2.5–9: Minor
-- < 2.5: Low
-(NaN or 0 => N/A, meaning insufficient data or factor = 0)
+  const riskClassificationText = `Risk Classification Explanation
+
+- **Critical (≥ 100):** Represents a potential shutdown equal to one full operating day (typically around 480 minutes of lost production). Immediate corrective action is required to avoid severe disruption.
+- **Severe (50–99):** Indicates a very high risk that could result in substantial downtime—often in the range of 240 to 480 minutes. These conditions demand prompt investigation and repair.
+- **High (25–49):** Signifies a significant risk level that may lead to several hours (approximately 120–240 minutes) of production loss. Proactive maintenance is recommended.
+- **Moderate (10–24):** Reflects a moderate risk where potential downtime might be around 60 to 120 minutes. Regular monitoring and scheduled maintenance should be maintained.
+- **Minor (2.5–9):** Suggests a low risk with minimal disruption—typically less than 60 minutes of downtime. Although not urgent, continued observation is advisable.
+- **Low (< 2.5 or N/A):** A score below 2.5—or when the risk score is not determined (displayed as “N/A”)—implies negligible risk, meaning there is either insufficient data or the impact is minimal (often less than 15 minutes).
 `;
 
   const handleExport = () => {
@@ -1283,16 +1321,6 @@ const PredictiveInsights: React.FC = () => {
                   machineRisk = NaN;
                 }
                 const machineRiskText = isNaN(machineRisk) ? 'N/A' : machineRisk.toFixed(0);
-
-                const riskClassificationText = `Risk Classification:
-- ≥ 100: Critical
-- 50–99: Severe
-- 25–49: High
-- 10–24: Moderate
-- 2.5–9: Minor
-- < 2.5: Low
-(NaN or 0 => N/A, meaning insufficient data or factor = 0)
-`;
 
                 return (
                   <div key={mach.id} className="bg-white shadow rounded-lg p-6">
