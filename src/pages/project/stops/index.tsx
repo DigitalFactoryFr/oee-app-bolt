@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
   Plus,
@@ -10,12 +10,9 @@ import {
   AlertCircle,
   User,
   ChevronRight,
-  // PenTool as Tool, // Si vous avez un souci d'import, utilisez une autre icône
   AlertTriangle
 } from 'lucide-react';
 import ProjectLayout from '../../../components/layout/ProjectLayout';
-import { useDataStore } from '../../../store/dataStore';
-import { useAuthStore } from '../../../store/authStore';
 import { supabase } from '../../../lib/supabase';
 import type { StopEvent } from '../../../types';
 
@@ -26,7 +23,7 @@ interface FilterTag {
   type: 'date' | 'status' | 'failure_type' | 'owner';
 }
 
-// Convertit start/end en "Xh Ym"
+// Fonctions utilitaires existantes
 function getDuration(startTime?: string, endTime?: string) {
   const end = endTime ? new Date(endTime) : new Date();
   const diff = end.getTime() - new Date(startTime || '').getTime();
@@ -36,7 +33,6 @@ function getDuration(startTime?: string, endTime?: string) {
   return `${hours}h ${remain}m`;
 }
 
-// Convertit total ms en "Xh Ym" (pour le KPI)
 function msToHhMm(ms: number): string {
   const minutes = Math.floor(ms / 60000);
   const hours = Math.floor(minutes / 60);
@@ -58,9 +54,7 @@ function getFailureTypeColor(type: string) {
 function getFailureTypeIcon(type: string) {
   switch (type) {
     case 'AP': return <Clock className="h-4 w-4" />;
-    case 'PA': 
-      // return <Tool className="h-4 w-4" />;
-      return <AlertTriangle className="h-4 w-4" />;
+    case 'PA': return <AlertTriangle className="h-4 w-4" />;
     case 'DO': return <AlertTriangle className="h-4 w-4" />;
     case 'NQ': return <AlertCircle className="h-4 w-4" />;
     case 'CS': return <ChevronRight className="h-4 w-4" />;
@@ -68,38 +62,150 @@ function getFailureTypeIcon(type: string) {
   }
 }
 
+// Composant StopEventCard extrait et optimisé avec React.memo()
+const StopEventCard = React.memo(({
+  stop,
+  projectId,
+  formatEmail,
+  handleCompleteStop,
+  navigate
+}: {
+  stop: StopEvent;
+  projectId: string;
+  formatEmail: (email: string) => string;
+  handleCompleteStop: (stopId: string) => void;
+  navigate: (path: string) => void;
+}) => {
+  const durationCard = getDuration(stop.start_time, stop.end_time);
+  return (
+    <div
+      onClick={() => navigate(`/projects/${projectId}/stops/${stop.id}`)}
+      className="bg-white border rounded-lg shadow-sm hover:shadow-md transition-shadow duration-200 cursor-pointer"
+    >
+      <div className="p-4">
+        {/* Header */}
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center space-x-2">
+            <span
+              className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                stop.status === 'completed'
+                  ? 'bg-green-100 text-green-800'
+                  : 'bg-yellow-100 text-yellow-800'
+              }`}
+            >
+              {stop.status === 'completed' ? 'Completed' : 'Ongoing'}
+            </span>
+            <span
+              className={`inline-flex items-center space-x-1 px-2.5 py-0.5 rounded-full text-xs font-medium ${getFailureTypeColor(stop.failure_type)}`}
+            >
+              {getFailureTypeIcon(stop.failure_type)}
+              <span>{stop.failure_type}</span>
+            </span>
+          </div>
+          <div className="text-sm text-gray-500">{durationCard}</div>
+        </div>
+
+        {/* Content */}
+        <div className="space-y-3">
+          <div>
+            <div className="text-sm font-medium text-gray-900">
+              {stop.products.name}
+            </div>
+            <div className="text-sm text-gray-500">
+              {stop.machines.name}
+            </div>
+          </div>
+          <div>
+            <div className="text-sm text-gray-500">
+              {new Date(stop.date).toLocaleDateString()} •{' '}
+              {new Date(stop.start_time).toLocaleTimeString().slice(0, -3)}
+              {stop.end_time &&
+                ` - ${new Date(stop.end_time).toLocaleTimeString().slice(0, -3)}`}
+            </div>
+          </div>
+          <div>
+            <div className="text-sm font-medium text-gray-900">
+              {stop.cause}
+            </div>
+            {stop.comment && (
+              <div className="mt-1 text-sm text-gray-500 line-clamp-2">
+                {stop.comment}
+              </div>
+            )}
+          </div>
+          <div className="flex items-center pt-2 border-t border-gray-100">
+            <User className="h-4 w-4 text-gray-400 mr-2" />
+            <span className="text-sm text-gray-600">
+              {formatEmail(stop.team_members.email)}
+            </span>
+          </div>
+        </div>
+
+        {/* Actions */}
+        {stop.status === 'ongoing' && (
+          <div className="mt-4 pt-3 border-t border-gray-100">
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                handleCompleteStop(stop.id);
+              }}
+              className="w-full inline-flex justify-center items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700"
+            >
+              <CheckCircle className="h-4 w-4 mr-2" />
+              Complete Stop
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+});
+
 const StopEventsPage: React.FC = () => {
   const { projectId } = useParams<{ projectId: string }>();
   const navigate = useNavigate();
-  const { user } = useAuthStore();
-  
   const [stops, setStops] = useState<StopEvent[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError]   = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
+  const [debouncedSearchTerm, setDebouncedSearchTerm] = useState(searchTerm);
   const [activeTags, setActiveTags] = useState<FilterTag[]>([]);
   const [showFilterMenu, setShowFilterMenu] = useState(false);
+  // Affichage initial limité à 50 stops
+  const [visibleCount, setVisibleCount] = useState(50);
+
+  // Debounce sur le champ de recherche (300ms)
+  useEffect(() => {
+    const handler = setTimeout(() => {
+      setDebouncedSearchTerm(searchTerm);
+    }, 300);
+    return () => clearTimeout(handler);
+  }, [searchTerm]);
+
+  // Réinitialise le nombre de stops affichés quand la recherche ou les filtres changent
+  useEffect(() => {
+    setVisibleCount(50);
+  }, [debouncedSearchTerm, activeTags]);
 
   useEffect(() => {
     loadStops();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, activeTags]);
 
   const loadStops = async () => {
-    if (!projectId || !user?.email) return;
-
+    if (!projectId) return;
     try {
       setLoading(true);
       setError(null);
 
-      // Récupère l'ID du team_member (si besoin "My Stops")
+      // Récupère l'ID du team_member (pour filtrer "My Stops")
       const { data: teamMember } = await supabase
         .from('team_members')
         .select('id')
         .eq('project_id', projectId)
-        .eq('email', user.email)
+        .eq('email', (await supabase.auth.getUser()).data.user?.email)
         .single();
 
-      // Requête Supabase + tri par created_at desc
       let query = supabase
         .from('stop_events')
         .select(`
@@ -109,9 +215,8 @@ const StopEventsPage: React.FC = () => {
           team_members:team_member (email)
         `)
         .eq('project_id', projectId)
-        .order('created_at', { ascending: false }); // <-- Tri décroissant par created_at
+        .order('created_at', { ascending: false });
 
-      // Applique les filtres
       activeTags.forEach(tag => {
         switch (tag.type) {
           case 'date':
@@ -143,7 +248,6 @@ const StopEventsPage: React.FC = () => {
 
       const { data, error } = await query;
       if (error) throw error;
-
       setStops(data as StopEvent[]);
     } catch (err) {
       console.error('Error loading stops:', err);
@@ -153,27 +257,30 @@ const StopEventsPage: React.FC = () => {
     }
   };
 
-  // Filtrage par mot-clé
-  const filteredStops = stops.filter(stop => {
-    if (!searchTerm) return true;
-    const searchLower = searchTerm.toLowerCase();
-    return (
-      stop.products.name.toLowerCase().includes(searchLower) ||
-      stop.machines.name.toLowerCase().includes(searchLower) ||
-      stop.team_members.email.toLowerCase().includes(searchLower) ||
-      stop.failure_type.toLowerCase().includes(searchLower) ||
-      stop.cause.toLowerCase().includes(searchLower)
-    );
-  });
+  // Filtrage mémorisé par mot-clé (debouncedSearchTerm)
+  const filteredStops = useMemo(() => {
+    return stops.filter(stop => {
+      if (!debouncedSearchTerm) return true;
+      const searchLower = debouncedSearchTerm.toLowerCase();
+      return (
+        stop.products.name.toLowerCase().includes(searchLower) ||
+        stop.machines.name.toLowerCase().includes(searchLower) ||
+        stop.team_members.email.toLowerCase().includes(searchLower) ||
+        stop.failure_type.toLowerCase().includes(searchLower) ||
+        stop.cause.toLowerCase().includes(searchLower)
+      );
+    });
+  }, [stops, debouncedSearchTerm]);
+
+  // On limite l'affichage aux stops définis par visibleCount
+  const visibleStops = useMemo(() => filteredStops.slice(0, visibleCount), [filteredStops, visibleCount]);
 
   const formatEmail = (email: string) => email.split('@')[0];
 
-  // Retire un tag de filtre
   const removeTag = (tagId: string) => {
     setActiveTags(tags => tags.filter(tag => tag.id !== tagId));
   };
 
-  // Ajoute (remplace) un tag
   const addTag = (tag: FilterTag) => {
     setActiveTags(tags => {
       const filtered = tags.filter(t => t.type !== tag.type);
@@ -181,6 +288,31 @@ const StopEventsPage: React.FC = () => {
     });
     setShowFilterMenu(false);
   };
+
+  // Fonctions d'options pour les filtres (à adapter selon votre implémentation)
+  const getOwnerOptions = () => [
+    { label: 'My Stops', value: 'my-stops' }
+    // Ajoutez d'autres options si nécessaire
+  ];
+  const getDateOptions = () => [
+    { label: 'Today', value: new Date().toISOString().split('T')[0] },
+    { label: 'Yesterday', value: new Date(Date.now() - 86400000).toISOString().split('T')[0] },
+    { label: 'Last 7 days', value: 'last7days' },
+    { label: 'All dates', value: 'all' }
+  ];
+  const getStatusOptions = () => [
+    { label: 'Ongoing', value: 'ongoing' },
+    { label: 'Completed', value: 'completed' },
+    { label: 'All Status', value: 'all' }
+  ];
+  const getFailureTypeOptions = () => [
+    { label: 'AP', value: 'AP' },
+    { label: 'PA', value: 'PA' },
+    { label: 'DO', value: 'DO' },
+    { label: 'NQ', value: 'NQ' },
+    { label: 'CS', value: 'CS' },
+    { label: 'All Types', value: 'all' }
+  ];
 
   // Calcul "Total Duration Today"
   const todayStr = new Date().toISOString().split('T')[0];
@@ -202,7 +334,6 @@ const StopEventsPage: React.FC = () => {
           status: 'completed'
         })
         .eq('id', stopId);
-
       await loadStops();
     } catch (error) {
       console.error('Error completing stop:', error);
@@ -351,7 +482,9 @@ const StopEventsPage: React.FC = () => {
                   <div className="absolute right-0 mt-2 w-56 rounded-md shadow-lg bg-white ring-1 ring-black ring-opacity-5 z-10">
                     <div className="py-1" role="menu">
                       {/* Owner */}
-                      <div className="px-4 py-2 text-xs font-semibold text-gray-500">Owner</div>
+                      <div className="px-4 py-2 text-xs font-semibold text-gray-500">
+                        Owner
+                      </div>
                       {getOwnerOptions().map(option => (
                         <button
                           key={option.value}
@@ -433,8 +566,6 @@ const StopEventsPage: React.FC = () => {
                 )}
               </div>
             </div>
-
-            {/* Active Filters */}
             {activeTags.length > 0 && (
               <div className="mt-4 flex items-center space-x-2 overflow-x-auto pb-2">
                 {activeTags.map(tag => (
@@ -486,100 +617,30 @@ const StopEventsPage: React.FC = () => {
                 </div>
               </div>
             ) : (
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                {filteredStops.map(stop => {
-                  const durationCard = getDuration(stop.start_time, stop.end_time);
-
-                  return (
-                    <div
+              <>
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                  {visibleStops.map(stop => (
+                    <StopEventCard
                       key={stop.id}
-                      onClick={() => navigate(`/projects/${projectId}/stops/${stop.id}`)}
-                      className="bg-white border rounded-lg shadow-sm hover:shadow-md transition-shadow duration-200 cursor-pointer"
+                      stop={stop}
+                      projectId={projectId!}
+                      formatEmail={formatEmail}
+                      handleCompleteStop={handleCompleteStop}
+                      navigate={navigate}
+                    />
+                  ))}
+                </div>
+                {filteredStops.length > visibleCount && (
+                  <div className="mt-4 text-center">
+                    <button
+                      onClick={() => setVisibleCount(visibleCount + 50)}
+                      className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700"
                     >
-                      <div className="p-4">
-                        {/* Header */}
-                        <div className="flex items-center justify-between mb-4">
-                          <div className="flex items-center space-x-2">
-                            <span
-                              className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                                stop.status === 'completed'
-                                  ? 'bg-green-100 text-green-800'
-                                  : 'bg-yellow-100 text-yellow-800'
-                              }`}
-                            >
-                              {stop.status === 'completed' ? 'Completed' : 'Ongoing'}
-                            </span>
-                            <span
-                              className={`inline-flex items-center space-x-1 px-2.5 py-0.5 rounded-full text-xs font-medium ${getFailureTypeColor(stop.failure_type)}`}
-                            >
-                              {getFailureTypeIcon(stop.failure_type)}
-                              <span>{stop.failure_type}</span>
-                            </span>
-                          </div>
-                          <div className="text-sm text-gray-500">
-                            {durationCard}
-                          </div>
-                        </div>
-
-                        {/* Content */}
-                        <div className="space-y-3">
-                          <div>
-                            <div className="text-sm font-medium text-gray-900">
-                              {stop.products.name}
-                            </div>
-                            <div className="text-sm text-gray-500">
-                              {stop.machines.name}
-                            </div>
-                          </div>
-
-                          <div>
-                            <div className="text-sm text-gray-500">
-                              {new Date(stop.date).toLocaleDateString()} •{' '}
-                              {new Date(stop.start_time).toLocaleTimeString().slice(0, -3)}
-                              {stop.end_time &&
-                                ` - ${new Date(stop.end_time).toLocaleTimeString().slice(0, -3)}`}
-                            </div>
-                          </div>
-
-                          <div>
-                            <div className="text-sm font-medium text-gray-900">
-                              {stop.cause}
-                            </div>
-                            {stop.comment && (
-                              <div className="mt-1 text-sm text-gray-500 line-clamp-2">
-                                {stop.comment}
-                              </div>
-                            )}
-                          </div>
-
-                          <div className="flex items-center pt-2 border-t border-gray-100">
-                            <User className="h-4 w-4 text-gray-400 mr-2" />
-                            <span className="text-sm text-gray-600">
-                              {formatEmail(stop.team_members.email)}
-                            </span>
-                          </div>
-                        </div>
-
-                        {/* Actions */}
-                        {stop.status === 'ongoing' && (
-                          <div className="mt-4 pt-3 border-t border-gray-100">
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleCompleteStop(stop.id);
-                              }}
-                              className="w-full inline-flex justify-center items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700"
-                            >
-                              <CheckCircle className="h-4 w-4 mr-2" />
-                              Complete Stop
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
+                      Voir plus
+                    </button>
+                  </div>
+                )}
+              </>
             )}
           </div>
         </div>

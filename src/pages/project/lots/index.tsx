@@ -1,9 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { Plus, Search, Filter, X, Calendar, Activity, AlertTriangle, Clock, Check } from 'lucide-react';
 import ProjectLayout from '../../../components/layout/ProjectLayout';
-import { useDataStore } from '../../../store/dataStore';
-import { useAuthStore } from '../../../store/authStore';
 import { supabase } from '../../../lib/supabase';
 
 interface LotStats {
@@ -17,7 +15,7 @@ interface LotStats {
 
 interface Lot {
   id: string;
-  lot_id?: string;            // Affichage du lot_id
+  lot_id?: string;
   date: string;
   start_time: string;
   end_time: string;
@@ -29,7 +27,7 @@ interface Lot {
   lot_size: number;
   stop_events: { id: string }[];
   quality_issues: { id: string }[];
-  created_at?: string;        // Assurez-vous que ce champ existe dans votre table
+  created_at?: string;
 }
 
 interface FilterTag {
@@ -38,6 +36,81 @@ interface FilterTag {
   value: string;
   type: 'date' | 'status' | 'owner';
 }
+
+// Composant LotCard extrait et optimisé avec React.memo()
+const LotCard = React.memo(({ lot, projectId, formatEmail }: { lot: Lot; projectId: string; formatEmail: (email: string) => string; }) => {
+  return (
+    <Link
+      to={`/projects/${projectId}/lots/${lot.id}`}
+      className="block bg-white border rounded-lg shadow-sm hover:shadow-md transition-shadow duration-200"
+    >
+      <div className="p-4">
+        {lot.lot_id && (
+          <div className="text-xs font-semibold text-gray-800 bg-gray-100 px-2 py-1 rounded inline-block mb-2">
+            Lot #{lot.lot_id}
+          </div>
+        )}
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <h3 className="text-lg font-medium text-gray-900">
+              {lot.products.name}
+            </h3>
+            <p className="text-sm text-gray-500">{lot.machines.name}</p>
+          </div>
+          <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+            lot.status === 'in_progress'
+              ? 'bg-blue-100 text-blue-800'
+              : 'bg-green-100 text-green-800'
+          }`}>
+            {lot.status === 'in_progress' ? 'In Progress' : 'Completed'}
+          </span>
+        </div>
+        <div className="space-y-2">
+          <div className="flex items-center justify-between text-sm">
+            <span className="text-gray-500">Team Member</span>
+            <span className="font-medium">{formatEmail(lot.team_members.email)}</span>
+          </div>
+          <div className="flex items-center justify-between text-sm">
+            <span className="text-gray-500">Time</span>
+            <span className="font-medium">
+              {lot.start_time.slice(11, 16)} - {lot.end_time.slice(11, 16)}
+            </span>
+          </div>
+          <div className="flex items-center justify-between text-sm">
+            <span className="text-gray-500">Progress</span>
+            <span className="font-medium">
+              {lot.ok_parts_produced} / {lot.lot_size}
+            </span>
+          </div>
+        </div>
+        <div className="mt-4">
+          <div className="relative pt-1">
+            <div className="overflow-hidden h-2 text-xs flex rounded bg-gray-100">
+              <div
+                style={{ width: `${(lot.ok_parts_produced / lot.lot_size) * 100}%` }}
+                className="shadow-none flex flex-col text-center whitespace-nowrap text-white justify-center bg-blue-500"
+              />
+            </div>
+          </div>
+        </div>
+        <div className="mt-4 flex items-center space-x-4 text-sm">
+          {lot.stop_events && lot.stop_events.length > 0 && (
+            <div className="flex items-center text-red-600">
+              <Clock className="h-4 w-4 mr-1" />
+              <span>{lot.stop_events.length} stops</span>
+            </div>
+          )}
+          {lot.quality_issues && lot.quality_issues.length > 0 && (
+            <div className="flex items-center text-orange-600">
+              <AlertTriangle className="h-4 w-4 mr-1" />
+              <span>{lot.quality_issues.length} issues</span>
+            </div>
+          )}
+        </div>
+      </div>
+    </Link>
+  );
+});
 
 const LotsPage: React.FC = () => {
   const { projectId } = useParams<{ projectId: string }>();
@@ -53,8 +126,24 @@ const LotsPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
+  const [debouncedSearchTerm, setDebouncedSearchTerm] = useState(searchTerm);
   const [activeTags, setActiveTags] = useState<FilterTag[]>([]);
   const [showFilterMenu, setShowFilterMenu] = useState(false);
+  // On limite l'affichage initial à 50 lots
+  const [visibleCount, setVisibleCount] = useState(50);
+
+  // Debounce du champ de recherche (300ms)
+  useEffect(() => {
+    const handler = setTimeout(() => {
+      setDebouncedSearchTerm(searchTerm);
+    }, 300);
+    return () => clearTimeout(handler);
+  }, [searchTerm]);
+
+  // Réinitialiser le nombre de lots affichés quand la recherche ou les filtres changent
+  useEffect(() => {
+    setVisibleCount(50);
+  }, [debouncedSearchTerm, activeTags]);
 
   useEffect(() => {
     if (projectId) {
@@ -65,11 +154,9 @@ const LotsPage: React.FC = () => {
 
   const loadStats = async () => {
     if (!projectId) return;
-
     try {
       const today = new Date().toISOString().split('T')[0];
 
-      // Récupération des stats "in_progress" / "completed"
       const { data: lotsStats, error: lotsError } = await supabase
         .from('lots')
         .select('status', { count: 'exact' })
@@ -77,7 +164,6 @@ const LotsPage: React.FC = () => {
         .in('status', ['in_progress', 'completed']);
       if (lotsError) throw lotsError;
 
-      // Récupération du nombre de stops créés aujourd'hui
       const { data: stopsData, error: stopsError } = await supabase
         .from('stop_events')
         .select('id')
@@ -85,7 +171,6 @@ const LotsPage: React.FC = () => {
         .eq('date', today);
       if (stopsError) throw stopsError;
 
-      // Récupération du nombre de quality issues créés aujourd'hui
       const { data: qualityData, error: qualityError } = await supabase
         .from('quality_issues')
         .select('id')
@@ -93,7 +178,6 @@ const LotsPage: React.FC = () => {
         .eq('date', today);
       if (qualityError) throw qualityError;
 
-      // Récupération des lots "in_progress" mais en retard (end_time < maintenant)
       const { data: delayedData, error: delayedError } = await supabase
         .from('lots')
         .select('id')
@@ -117,7 +201,6 @@ const LotsPage: React.FC = () => {
 
   const loadLots = async () => {
     if (!projectId) return;
-
     try {
       setLoading(true);
       setError(null);
@@ -141,10 +224,8 @@ const LotsPage: React.FC = () => {
           created_at
         `)
         .eq('project_id', projectId)
-        // Tri par date de création (plus récent en premier)
         .order('created_at', { ascending: false });
 
-      // Application des filtres (activeTags)
       activeTags.forEach(tag => {
         switch (tag.type) {
           case 'date':
@@ -161,12 +242,13 @@ const LotsPage: React.FC = () => {
               query = query.eq('status', tag.value);
             }
             break;
+          default:
+            break;
         }
       });
 
       const { data, error } = await query;
       if (error) throw error;
-
       setLots(data as Lot[]);
     } catch (err) {
       console.error('Error loading lots:', err);
@@ -176,35 +258,38 @@ const LotsPage: React.FC = () => {
     }
   };
 
-  // Filtrage par "searchTerm"
-  const filteredLots = lots.filter(lot => {
-    if (!searchTerm) return true;
-    const searchLower = searchTerm.toLowerCase();
-    return (
-      lot.products.name.toLowerCase().includes(searchLower) ||
-      lot.machines.name.toLowerCase().includes(searchLower) ||
-      lot.team_members.email.toLowerCase().includes(searchLower) ||
-      (lot.lot_id && lot.lot_id.toLowerCase().includes(searchLower))
-    );
-  });
+  // Filtrage des lots avec useMemo en fonction du debouncedSearchTerm
+  const filteredLots = useMemo(() => {
+    return lots.filter(lot => {
+      if (!debouncedSearchTerm) return true;
+      const searchLower = debouncedSearchTerm.toLowerCase();
+      return (
+        lot.products.name.toLowerCase().includes(searchLower) ||
+        lot.machines.name.toLowerCase().includes(searchLower) ||
+        lot.team_members.email.toLowerCase().includes(searchLower) ||
+        (lot.lot_id && lot.lot_id.toLowerCase().includes(searchLower))
+      );
+    });
+  }, [lots, debouncedSearchTerm]);
+
+  // On limite l'affichage aux lots dont le nombre est défini par visibleCount
+  const visibleLots = useMemo(() => filteredLots.slice(0, visibleCount), [filteredLots, visibleCount]);
 
   const formatEmail = (email: string) => email.split('@')[0];
 
-  // Gestion des tags
   const removeTag = (tagId: string) => {
     setActiveTags(tags => tags.filter(tag => tag.id !== tagId));
   };
 
   const addTag = (tag: FilterTag) => {
     setActiveTags(tags => {
-      // On supprime l'ancien tag du même type
+      // On remplace le tag du même type le cas échéant
       const filtered = tags.filter(t => t.type !== tag.type);
       return [...filtered, tag];
     });
     setShowFilterMenu(false);
   };
 
-  // Options pour le filtrage
   const getDateOptions = () => [
     { label: 'Today', value: new Date().toISOString().split('T')[0] },
     { label: 'Yesterday', value: new Date(Date.now() - 86400000).toISOString().split('T')[0] },
@@ -339,7 +424,7 @@ const LotsPage: React.FC = () => {
 
         {/* Lots List */}
         <div className="bg-white shadow rounded-lg">
-          {/* Search and Filters */}
+          {/* Search et Filtres */}
           <div className="p-4 border-b border-gray-200">
             <div className="flex items-center space-x-4">
               <div className="flex-1 relative">
@@ -390,8 +475,6 @@ const LotsPage: React.FC = () => {
                 )}
               </div>
             </div>
-
-            {/* Active Filters */}
             {activeTags.length > 0 && (
               <div className="mt-4 flex items-center space-x-2 overflow-x-auto pb-2">
                 {activeTags.map(tag => (
@@ -412,7 +495,7 @@ const LotsPage: React.FC = () => {
             )}
           </div>
 
-          {/* Lots Grid */}
+          {/* Affichage des lots */}
           <div className="p-4">
             {loading ? (
               <div className="flex justify-center items-center h-32">
@@ -441,87 +524,23 @@ const LotsPage: React.FC = () => {
                 </div>
               </div>
             ) : (
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                {filteredLots.map((lot) => (
-                  <Link
-                    key={lot.id}
-                    to={`/projects/${projectId}/lots/${lot.id}`}
-                    className="block bg-white border rounded-lg shadow-sm hover:shadow-md transition-shadow duration-200"
-                  >
-                    <div className="p-4">
-                      {/* Affichage du lot_id si disponible */}
-                      {lot.lot_id && (
-                        <div className="text-xs font-semibold text-gray-800 bg-gray-100 px-2 py-1 rounded inline-block mb-2">
-                          Lot #{lot.lot_id}
-                        </div>
-                      )}
-
-                      <div className="flex items-center justify-between mb-4">
-                        <div>
-                          <h3 className="text-lg font-medium text-gray-900">
-                            {lot.products.name}
-                          </h3>
-                          <p className="text-sm text-gray-500">{lot.machines.name}</p>
-                        </div>
-                        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                          lot.status === 'in_progress'
-                            ? 'bg-blue-100 text-blue-800'
-                            : 'bg-green-100 text-green-800'
-                        }`}>
-                          {lot.status === 'in_progress' ? 'In Progress' : 'Completed'}
-                        </span>
-                      </div>
-
-                      <div className="space-y-2">
-                        <div className="flex items-center justify-between text-sm">
-                          <span className="text-gray-500">Team Member</span>
-                          <span className="font-medium">{formatEmail(lot.team_members.email)}</span>
-                        </div>
-                        <div className="flex items-center justify-between text-sm">
-                          <span className="text-gray-500">Time</span>
-                          <span className="font-medium">
-                            {lot.start_time.slice(11, 16)} - {lot.end_time.slice(11, 16)}
-                          </span>
-                        </div>
-                        <div className="flex items-center justify-between text-sm">
-                          <span className="text-gray-500">Progress</span>
-                          <span className="font-medium">
-                            {lot.ok_parts_produced} / {lot.lot_size}
-                          </span>
-                        </div>
-                      </div>
-
-                      <div className="mt-4">
-                        <div className="relative pt-1">
-                          <div className="overflow-hidden h-2 text-xs flex rounded bg-gray-100">
-                            <div
-                              style={{
-                                width: `${(lot.ok_parts_produced / lot.lot_size) * 100}%`
-                              }}
-                              className="shadow-none flex flex-col text-center whitespace-nowrap text-white justify-center bg-blue-500"
-                            />
-                          </div>
-                        </div>
-                      </div>
-
-                      <div className="mt-4 flex items-center space-x-4 text-sm">
-                        {lot.stop_events && lot.stop_events.length > 0 && (
-                          <div className="flex items-center text-red-600">
-                            <Clock className="h-4 w-4 mr-1" />
-                            <span>{lot.stop_events.length} stops</span>
-                          </div>
-                        )}
-                        {lot.quality_issues && lot.quality_issues.length > 0 && (
-                          <div className="flex items-center text-orange-600">
-                            <AlertTriangle className="h-4 w-4 mr-1" />
-                            <span>{lot.quality_issues.length} issues</span>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  </Link>
-                ))}
-              </div>
+              <>
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                  {visibleLots.map(lot => (
+                    <LotCard key={lot.id} lot={lot} projectId={projectId!} formatEmail={formatEmail} />
+                  ))}
+                </div>
+                {filteredLots.length > visibleCount && (
+                  <div className="mt-4 text-center">
+                    <button
+                      onClick={() => setVisibleCount(visibleCount + 50)}
+                      className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700"
+                    >
+                      Voir plus
+                    </button>
+                  </div>
+                )}
+              </>
             )}
           </div>
         </div>

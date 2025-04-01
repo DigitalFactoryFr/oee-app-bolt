@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
   Plus,
@@ -9,9 +9,8 @@ import {
   CheckCircle,
   AlertCircle,
   User
-} from 'lucide-react'; // vous pouvez ajuster l'import si besoin
+} from 'lucide-react';
 import ProjectLayout from '../../../components/layout/ProjectLayout';
-import { useDataStore } from '../../../store/dataStore';
 import { useAuthStore } from '../../../store/authStore';
 import { supabase } from '../../../lib/supabase';
 import type { QualityIssue } from '../../../types';
@@ -51,22 +50,143 @@ const getCategoryLabel = (category: string) => {
   }
 };
 
+// Composant QualityIssueCard extrait et optimisé avec React.memo()
+const QualityIssueCard = React.memo(({
+  issue,
+  projectId,
+  formatEmail,
+  handleCompleteIssue,
+  navigate
+}: {
+  issue: QualityIssue;
+  projectId: string;
+  formatEmail: (email: string) => string;
+  handleCompleteIssue: (issueId: string) => void;
+  navigate: (path: string) => void;
+}) => {
+  return (
+    <div
+      onClick={() => navigate(`/projects/${projectId}/quality/${issue.id}`)}
+      className="bg-white border rounded-lg shadow-sm hover:shadow-md transition-shadow duration-200 cursor-pointer"
+    >
+      <div className="p-4">
+        {/* Header */}
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center space-x-2">
+            <span
+              className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                issue.status === 'completed'
+                  ? 'bg-green-100 text-green-800'
+                  : 'bg-yellow-100 text-yellow-800'
+              }`}
+            >
+              {issue.status === 'completed' ? 'Completed' : 'Ongoing'}
+            </span>
+            <span
+              className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getCategoryColor(issue.category)}`}
+            >
+              {getCategoryLabel(issue.category)}
+            </span>
+          </div>
+          <div className="text-sm font-medium text-gray-900">
+            {issue.quantity} parts
+          </div>
+        </div>
+
+        {/* Content */}
+        <div className="space-y-3">
+          <div>
+            <div className="text-sm font-medium text-gray-900">
+              {issue.products.name}
+            </div>
+            <div className="text-sm text-gray-500">
+              {issue.machines.name}
+            </div>
+          </div>
+          <div>
+            <div className="text-sm text-gray-500">
+              {new Date(issue.date).toLocaleDateString()}
+              {issue.start_time &&
+                ` • ${new Date(issue.start_time).toLocaleTimeString().slice(0, -3)}`}
+              {issue.end_time &&
+                ` - ${new Date(issue.end_time).toLocaleTimeString().slice(0, -3)}`}
+            </div>
+          </div>
+          <div>
+            <div className="text-sm font-medium text-gray-900">
+              {issue.cause}
+            </div>
+            {issue.comment && (
+              <div className="mt-1 text-sm text-gray-500 line-clamp-2">
+                {issue.comment}
+              </div>
+            )}
+          </div>
+          <div className="flex items-center pt-2 border-t border-gray-100">
+            <User className="h-4 w-4 text-gray-400 mr-2" />
+            <span className="text-sm text-gray-600">
+              {formatEmail(issue.team_members.email)}
+            </span>
+          </div>
+        </div>
+
+        {/* Actions */}
+        {issue.status === 'ongoing' && (
+          <div className="mt-4 pt-3 border-t border-gray-100">
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                handleCompleteIssue(issue.id);
+              }}
+              className="w-full inline-flex justify-center items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700"
+            >
+              <CheckCircle className="h-4 w-4 mr-2" />
+              Complete Issue
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+});
+
 const QualityIssuesPage: React.FC = () => {
   const { projectId } = useParams<{ projectId: string }>();
   const navigate = useNavigate();
   const { user } = useAuthStore();
+
   const [issues, setIssues] = useState<QualityIssue[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
   const [searchTerm, setSearchTerm] = useState('');
+  const [debouncedSearchTerm, setDebouncedSearchTerm] = useState(searchTerm);
+
   const [activeTags, setActiveTags] = useState<FilterTag[]>([]);
   const [showFilterMenu, setShowFilterMenu] = useState(false);
 
+  // Affichage initial limité à 50 issues
+  const [visibleCount, setVisibleCount] = useState(50);
+
+  // Debounce sur le champ de recherche (300ms)
+  useEffect(() => {
+    const handler = setTimeout(() => {
+      setDebouncedSearchTerm(searchTerm);
+    }, 300);
+    return () => clearTimeout(handler);
+  }, [searchTerm]);
+
+  // Réinitialise le nombre d'issues affichées lorsque la recherche ou les filtres changent
+  useEffect(() => {
+    setVisibleCount(50);
+  }, [debouncedSearchTerm, activeTags]);
+
   useEffect(() => {
     loadIssues();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, activeTags]);
 
-  // Charge la liste des QualityIssues, triées par created_at desc
+  // Charge la liste des Quality Issues
   const loadIssues = async () => {
     if (!projectId || !user?.email) return;
 
@@ -74,7 +194,7 @@ const QualityIssuesPage: React.FC = () => {
       setLoading(true);
       setError(null);
 
-      // Récupère l'ID du team_member pour filtrer si besoin "My Issues"
+      // Récupère l'ID du team_member pour filtrer "My Issues"
       const { data: teamMember } = await supabase
         .from('team_members')
         .select('id')
@@ -91,7 +211,7 @@ const QualityIssuesPage: React.FC = () => {
           team_members:team_member (email)
         `)
         .eq('project_id', projectId)
-        .order('created_at', { ascending: false }); // <-- Tri par date de création (décroissant)
+        .order('created_at', { ascending: false });
 
       // Applique les filtres
       activeTags.forEach(tag => {
@@ -120,6 +240,8 @@ const QualityIssuesPage: React.FC = () => {
               query = query.eq('team_member', teamMember.id);
             }
             break;
+          default:
+            break;
         }
       });
 
@@ -135,27 +257,30 @@ const QualityIssuesPage: React.FC = () => {
     }
   };
 
-  // Filtrage textuel
-  const filteredIssues = issues.filter(issue => {
-    if (!searchTerm) return true;
-    const searchLower = searchTerm.toLowerCase();
-    return (
-      issue.products.name.toLowerCase().includes(searchLower) ||
-      issue.machines.name.toLowerCase().includes(searchLower) ||
-      issue.team_members.email.toLowerCase().includes(searchLower) ||
-      issue.category.toLowerCase().includes(searchLower) ||
-      issue.cause.toLowerCase().includes(searchLower)
-    );
-  });
+  // Filtrage mémorisé des issues en fonction du debouncedSearchTerm
+  const filteredIssues = useMemo(() => {
+    return issues.filter(issue => {
+      if (!debouncedSearchTerm) return true;
+      const searchLower = debouncedSearchTerm.toLowerCase();
+      return (
+        issue.products.name.toLowerCase().includes(searchLower) ||
+        issue.machines.name.toLowerCase().includes(searchLower) ||
+        issue.team_members.email.toLowerCase().includes(searchLower) ||
+        issue.category.toLowerCase().includes(searchLower) ||
+        issue.cause.toLowerCase().includes(searchLower)
+      );
+    });
+  }, [issues, debouncedSearchTerm]);
+
+  // Limitation de l'affichage aux issues définies par visibleCount
+  const visibleIssues = useMemo(() => filteredIssues.slice(0, visibleCount), [filteredIssues, visibleCount]);
 
   const formatEmail = (email: string) => email.split('@')[0];
 
-  // Retire un tag de filtre
   const removeTag = (tagId: string) => {
     setActiveTags(tags => tags.filter(tag => tag.id !== tagId));
   };
 
-  // Ajoute (ou remplace) un tag
   const addTag = (tag: FilterTag) => {
     setActiveTags(tags => {
       const filtered = tags.filter(t => t.type !== tag.type);
@@ -190,7 +315,7 @@ const QualityIssuesPage: React.FC = () => {
     { label: 'All Issues', value: 'all-issues' }
   ];
 
-  // Marque un QualityIssue comme "completed"
+  // Marque un Quality Issue comme "completed"
   const handleCompleteIssue = async (issueId: string) => {
     try {
       await supabase
@@ -494,97 +619,30 @@ const QualityIssuesPage: React.FC = () => {
                 </div>
               </div>
             ) : (
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                {filteredIssues.map(issue => (
-                  <div
-                    key={issue.id}
-                    onClick={() => navigate(`/projects/${projectId}/quality/${issue.id}`)}
-                    className="bg-white border rounded-lg shadow-sm hover:shadow-md transition-shadow duration-200 cursor-pointer"
-                  >
-                    <div className="p-4">
-                      {/* Header */}
-                      <div className="flex items-center justify-between mb-4">
-                        <div className="flex items-center space-x-2">
-                          <span
-                            className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                              issue.status === 'completed'
-                                ? 'bg-green-100 text-green-800'
-                                : 'bg-yellow-100 text-yellow-800'
-                            }`}
-                          >
-                            {issue.status === 'completed' ? 'Completed' : 'Ongoing'}
-                          </span>
-                          <span
-                            className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getCategoryColor(issue.category)}`}
-                          >
-                            {getCategoryLabel(issue.category)}
-                          </span>
-                        </div>
-                        <div className="text-sm font-medium text-gray-900">
-                          {issue.quantity} parts
-                        </div>
-                      </div>
-
-                      {/* Content */}
-                      <div className="space-y-3">
-                        <div>
-                          <div className="text-sm font-medium text-gray-900">
-                            {issue.products.name}
-                          </div>
-                          <div className="text-sm text-gray-500">
-                            {issue.machines.name}
-                          </div>
-                        </div>
-                        <div>
-                          <div className="text-sm text-gray-500">
-                            {new Date(issue.date).toLocaleDateString()}
-                            {issue.start_time &&
-                              ` • ${new Date(issue.start_time)
-                                .toLocaleTimeString()
-                                .slice(0, -3)}`}
-                            {issue.end_time &&
-                              ` - ${new Date(issue.end_time)
-                                .toLocaleTimeString()
-                                .slice(0, -3)}`}
-                          </div>
-                        </div>
-                        <div>
-                          <div className="text-sm font-medium text-gray-900">
-                            {issue.cause}
-                          </div>
-                          {issue.comment && (
-                            <div className="mt-1 text-sm text-gray-500 line-clamp-2">
-                              {issue.comment}
-                            </div>
-                          )}
-                        </div>
-                        <div className="flex items-center pt-2 border-t border-gray-100">
-                          <User className="h-4 w-4 text-gray-400 mr-2" />
-                          <span className="text-sm text-gray-600">
-                            {formatEmail(issue.team_members.email)}
-                          </span>
-                        </div>
-                      </div>
-
-                      {/* Actions */}
-                      {issue.status === 'ongoing' && (
-                        <div className="mt-4 pt-3 border-t border-gray-100">
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleCompleteIssue(issue.id);
-                            }}
-                            className="w-full inline-flex justify-center items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700"
-                          >
-                            <CheckCircle className="h-4 w-4 mr-2" />
-                            Complete Issue
-                          </button>
-                        </div>
-                      )}
-                    </div>
+              <>
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                  {visibleIssues.map(issue => (
+                    <QualityIssueCard
+                      key={issue.id}
+                      issue={issue}
+                      projectId={projectId!}
+                      formatEmail={formatEmail}
+                      handleCompleteIssue={handleCompleteIssue}
+                      navigate={navigate}
+                    />
+                  ))}
+                </div>
+                {filteredIssues.length > visibleCount && (
+                  <div className="mt-4 text-center">
+                    <button
+                      onClick={() => setVisibleCount(visibleCount + 50)}
+                      className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700"
+                    >
+                      Voir plus
+                    </button>
                   </div>
-                ))}
-              </div>
+                )}
+              </>
             )}
           </div>
         </div>
